@@ -24,7 +24,8 @@ from lib.people import resolve_people, all_ref_images  # noqa: E402
 
 VISION_FIELDS = ["scene", "subjects", "actions", "shot_type", "camera_move",
                  "mood", "lighting", "quality_score",
-                 "subject_confidence", "subject_basis"]
+                 "subject_confidence", "subject_basis",
+                 "main_subject", "subject_kind"]
 
 
 def _subject_atoms(subjects) -> set:
@@ -140,6 +141,10 @@ def main() -> int:
         r.has_speech = tres.get("has_speech")
         r.usable_clips = tres.get("usable_clips", [])
         r.keyword = tres.get("keyword")
+        # 文本融合可借语音/上下文修正主体(如转写点明商品名);未给则保留视觉判断
+        for f in ("main_subject", "subject_kind"):
+            if tres.get(f):
+                setattr(r, f, tres[f])
         r.tags = sorted(set((vres.get("tags") or []) + (tres.get("tags") or [])))
         r.confidence = tres.get("confidence", vres.get("confidence"))
         r.processed_at = datetime.now(timezone.utc).isoformat()

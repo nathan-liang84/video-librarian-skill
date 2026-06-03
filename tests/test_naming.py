@@ -24,11 +24,12 @@ PEOPLE = {
 
 VOCAB = {
     "shot_type": ["全景", "中景", "特写"],
-    "scene": ["海边", "城市", "咖啡馆"],
+    "scene": ["海边", "城市", "咖啡馆", "餐厅"],
     "mood": ["温暖", "平静"],
     "camera_move": ["固定镜头", "推"],
     "lighting": ["日光", "黄昏"],
     "suggested_use": ["B-roll", "空镜"],
+    "subject_kind": ["人物", "物品", "建筑", "风景", "动物", "食物", "其他"],
 }
 
 
@@ -80,6 +81,48 @@ def test_assign_respects_taken():
              "subjects": ["寸寸"], "scene": ["海边"]}]
     names = assign_unique_names(recs, NAMING, taken={"20240715_寸寸_海边_01"})
     assert names["a"] == "20240715_寸寸_海边_02"
+
+
+def test_main_subject_object_when_no_person():
+    # 没人入镜:主体由 main_subject(物品)兜住,名字不再丢主体
+    rec = {"media_type": "video", "shot_at": "2024-07-15",
+           "subjects": ["空镜"], "main_subject": "柠檬茶", "scene": ["餐厅"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_柠檬茶_餐厅_01"
+
+
+def test_main_subject_overrides_people_when_model_picks_object():
+    # 模型判断主次:有人但镜头主拍物 → main_subject=物品 → 文件名用物品
+    rec = {"media_type": "video", "shot_at": "2024-07-15",
+           "subjects": ["寸寸"], "main_subject": "柠檬茶", "scene": ["餐厅"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_柠檬茶_餐厅_01"
+
+
+def test_person_as_main_subject():
+    rec = {"media_type": "video", "shot_at": "2024-07-15",
+           "subjects": ["寸寸"], "main_subject": "寸寸", "scene": ["海边"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_寸寸_海边_01"
+
+
+def test_subject_falls_back_to_people_without_main_subject():
+    # 模型没给 main_subject → 退回人物名册段(向后兼容)
+    rec = {"media_type": "video", "shot_at": "2024-07-15",
+           "subjects": ["寸寸"], "scene": ["海边"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_寸寸_海边_01"
+
+
+def test_long_main_subject_capped():
+    rec = {"media_type": "video", "shot_at": "2024-07-15", "subjects": ["空镜"],
+           "main_subject": "蜜雪冰城北京主题柠檬饮品", "scene": ["餐厅"]}
+    name = render_basename(rec, NAMING, 1)
+    assert "蜜雪冰城北京主题" in name and "柠檬饮品" not in name   # 限到 8 字
+
+
+def test_validate_subject_kind():
+    assert validate_record({"subject_kind": "物品", "subjects": ["空镜"]},
+                           VOCAB, PEOPLE) == []
+    issues = validate_record({"subject_kind": "外星人", "subjects": ["空镜"]},
+                             VOCAB, PEOPLE)
+    assert any("subject_kind" in i for i in issues)
 
 
 def test_roster_names_includes_specials():

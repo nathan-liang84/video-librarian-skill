@@ -25,6 +25,9 @@
 4. `has_speech`:转写非空且为有效人声 → true,否则 false。
 5. `usable_clips`(仅视频):基于内容判断"可直接用于剪辑的片段",给 `[{start, end, reason}]`(秒)。无明显可用段返回 `[]`。**不要编造时间码**,只在能从转写/画面合理推断时给出。
 6. `keyword`:1 个最能代表内容的短词(2-4 字,给文件命名用),如「日落」「漫步」「采访」。
+7. `main_subject` + `subject_kind`(画面主体,命名要用):沿用视觉分析里的值;若语音/上下文
+   表明主体判断更准(如转写点明了商品名),可修正。`main_subject` 为简短名词(≤8 字),
+   `subject_kind` 取 人物/物品/建筑/风景/动物/食物/其他。人物主体用名册人名。
 
 ## 输出 JSON 结构
 
@@ -36,6 +39,8 @@
   "has_speech": false,
   "usable_clips": [],
   "keyword": "...",
+  "main_subject": "柠檬茶",
+  "subject_kind": "物品",
   "tags": ["合并视觉 tags + 你补充的检索词，去重"],
   "confidence": 0.0
 }
