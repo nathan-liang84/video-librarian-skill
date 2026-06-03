@@ -80,3 +80,15 @@ def test_build_record_uses_video_probe(tmp_path, monkeypatch):
     assert record.duration_sec == 12.5
     assert record.resolution == "1920x1080"
     assert record.codec == "h264"
+
+
+def test_build_record_falls_back_to_file_mtime(tmp_path, monkeypatch):
+    scan = _load_scan_module()
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"photo")
+
+    monkeypatch.setattr(scan, "probe_photo", lambda path: {})
+
+    record = scan.build_record(photo, "photo")
+
+    assert record.shot_at is not None

@@ -85,6 +85,10 @@ def _iso_datetime(value: str | None) -> str | None:
     return text
 
 
+def _fallback_shot_at(path: Path) -> str:
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+
+
 def probe_video(path: Path) -> dict[str, Any]:
     cmd = [
         "ffprobe",
@@ -161,6 +165,7 @@ def probe_photo(path: Path) -> dict[str, Any]:
 
 def build_record(path: Path, media_type: str) -> Record:
     metadata = probe_video(path) if media_type == "video" else probe_photo(path)
+    shot_at = metadata.get("shot_at") or _fallback_shot_at(path)
     return Record(
         id=sha1_file(path)[:16],
         media_type=media_type,
@@ -172,7 +177,7 @@ def build_record(path: Path, media_type: str) -> Record:
         resolution=metadata.get("resolution"),
         fps=metadata.get("fps"),
         codec=metadata.get("codec"),
-        shot_at=metadata.get("shot_at"),
+        shot_at=shot_at,
         gps=metadata.get("gps"),
         device=metadata.get("device"),
     )
