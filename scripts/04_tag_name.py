@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,9 +54,14 @@ def do_rollback() -> int:
     if not log:
         print("没有可回滚的记录(state/rename_log.json 为空)。")
         return 0
-    restored, skipped = 0, 0
+    remaining = list(log)          # 只移除"已还原/已废弃"的条目,跳过项必须保留
+    restored = skipped = 0
     for entry in reversed(log):
         new_p, old_p = Path(entry["new"]), Path(entry["old"])
+        # journal 写了意图但 rename 未完成的废弃条目 → 直接丢弃,不计跳过
+        if not entry.get("applied", True) and not new_p.exists():
+            remaining.remove(entry)
+            continue
         if not new_p.exists():
             print(f"  [跳过] 现文件不存在:{new_p}")
             skipped += 1
@@ -66,10 +72,10 @@ def do_rollback() -> int:
             continue
         new_p.rename(old_p)
         print(f"  ↩ {new_p.name} → {old_p.name}")
+        remaining.remove(entry)
         restored += 1
-    if restored:
-        _save_log([])  # 全部还原后清空日志
-    print(f"\n回滚完成:还原 {restored},跳过 {skipped}。")
+    _save_log(remaining)           # 跳过项仍留在日志里,下次可继续回滚,不丢恢复信息
+    print(f"\n回滚完成:还原 {restored},跳过 {skipped},日志剩余 {len(remaining)} 条。")
     return 0
 
 
@@ -153,11 +159,28 @@ def main() -> int:
     print(f"\n{'== 执行改名 ==' if args.apply else '== 预览(dry-run,未改动)=='}")
     for r, src, dst in changes:
         if args.apply:
-            if dst.exists():
+            # ① 改名前先把意图持久化(applied=False),崩溃后也能从日志追溯/回滚
+            entry = {"id": r.id, "old": str(src), "new": str(dst),
+                     "ts": _now(), "applied": False}
+            log.append(entry)
+            _save_log(log)
+            # ② 原子 no-clobber:os.link 在目标已存在时报 FileExistsError,绝不覆盖
+            try:
+                os.link(src, dst)
+                os.unlink(src)
+            except FileExistsError:
+                log.pop(); _save_log(log)
                 print(f"  [跳过] 目标已存在:{dst.name}")
                 continue
-            src.rename(dst)
-            log.append({"id": r.id, "old": str(src), "new": str(dst), "ts": _now()})
+            except OSError:  # 跨文件系统无法硬链(同目录通常不会发生)→ 谨慎回退
+                if dst.exists():
+                    log.pop(); _save_log(log)
+                    print(f"  [跳过] 目标已存在:{dst.name}")
+                    continue
+                src.rename(dst)
+            # ③ 标记完成并落盘
+            entry["applied"] = True
+            _save_log(log)
             r.new_name = dst.name
             r.path = str(dst)
             r.status = "named"
@@ -166,9 +189,8 @@ def main() -> int:
         print(f"  {src.name}  →  {dst.name}")
 
     if args.apply:
-        _save_log(log)
         manifest.save()
-        print(f"\n完成:改名 {applied} 个;日志写入 {RENAME_LOG}(可 --rollback 还原)。")
+        print(f"\n完成:改名 {applied} 个;日志 {RENAME_LOG}(可 --rollback 还原)。")
     else:
         print(f"\n共 {len(changes)} 个待改名。确认后加 --apply 执行。")
     return 0

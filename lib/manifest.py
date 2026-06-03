@@ -63,7 +63,14 @@ class Manifest:
 
     def iter_pending(self, target_status: str, *, include_failed: bool = False
                      ) -> Iterator[Record]:
-        """产出尚未达到 target_status 的记录(默认跳过 failed,可显式纳入重试)。"""
+        """产出尚未达到 target_status 的记录(默认跳过 failed,可显式纳入重试)。
+
+        ⚠️ 注意:needs_review 不在线性进度内,会被视为"未达到",因此也会被产出。
+        各阶段【不要】用本方法当阶段闸口,否则重跑会把 needs_review 项打回重做、
+        覆盖复核状态。阶段应按上一阶段的【精确 status】取件,例如:
+        02 取 status=='pending'、03 取 'extracted'、04 取 'understood'。
+        本方法仅适合"找出所有还没走完到某阶段、需要兜底重试"的场景。
+        """
         for rec in self._records.values():
             if rec.status == "failed" and not include_failed:
                 continue

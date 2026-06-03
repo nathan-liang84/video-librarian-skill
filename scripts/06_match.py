@@ -18,16 +18,27 @@ from lib.config import load_config, load_vocab  # noqa: E402
 from lib.models import build_text_model  # noqa: E402
 
 
+def _atoms(subjects) -> set:
+    """把人物拆成原子集合:['寸寸和男朋友'] → {'寸寸','男朋友'},便于组合匹配。
+    多人/空镜 本身即原子,语义保留。"""
+    out = set()
+    for s in subjects or []:
+        for a in str(s).split("和"):
+            if a:
+                out.add(a)
+    return out
+
+
 def _hard_filter(req: dict, records: list, *, strict: bool) -> list:
     out = []
     want_scene = set(req.get("scene") or [])
-    want_subj = set(req.get("subjects") or [])
+    want_subj = _atoms(req.get("subjects"))
     want_shot = req.get("shot_type") or ""
     min_dur = req.get("min_dur_sec") or 0
     for r in records:
         if want_scene and not (want_scene & set(r.scene or [])):
             continue
-        if want_subj and not (want_subj & set(r.subjects or [])):
+        if want_subj and not (want_subj & _atoms(r.subjects)):
             continue
         if min_dur and (r.duration_sec or 0) < min_dur:
             continue

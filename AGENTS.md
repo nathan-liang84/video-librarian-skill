@@ -31,6 +31,7 @@ VideoLibrarian:跨平台视频/照片素材整理 Skill。管线见 [README.md](
 - **02→03 帧目录约定:`tmp/<record.id>/frames/*.jpg`**(03 按此读取关键帧)。
 - 改名默认 dry-run;`--apply` 必写 `state/rename_log.json` 且不删原文件(已实现,勿绕过)。
 - 状态流转:`pending→extracted→understood→named→stored`;低置信/低质 `needs_review`;异常 `failed`。
+- **阶段取件按"上一阶段的精确 status"**(如 02 取 `status=='pending'`、03 取 `'extracted'`、04 取 `'understood'`)。**不要用 `manifest.iter_pending()` 当阶段闸口**——`needs_review`/`failed` 不在线性进度内,会被误判为"未完成"而重跑、覆盖复核状态。`iter_pending` 仅用于兜底重试。
 
 ## 本地自检
 

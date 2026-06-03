@@ -87,11 +87,19 @@ class _ChatClient:
         for _ in range(max_retries + 1):
             try:
                 resp = requests.post(url, headers=headers, json=payload, timeout=120)
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
-            except Exception as e:  # noqa: BLE001
+            except requests.RequestException as e:   # 网络层错误 → 可重试
                 last_err = e
-        raise RuntimeError(f"模型调用失败({self.model}):{last_err}")
+                continue
+            if resp.status_code < 400:
+                return resp.json()["choices"][0]["message"]["content"]
+            # 4xx(鉴权/参数/模型名错误)不可重试,立即抛出并带响应内容,便于定位配置错误
+            if 400 <= resp.status_code < 500:
+                raise RuntimeError(
+                    f"模型调用失败({self.model}) HTTP {resp.status_code}(不可重试):"
+                    f"{resp.text[:300]}")
+            last_err = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")  # 5xx 重试
+        raise RuntimeError(
+            f"模型调用失败({self.model}),重试 {max_retries} 次仍失败:{last_err}")
 
 
 # ── 抽象接口 ───────────────────────────────────────────
