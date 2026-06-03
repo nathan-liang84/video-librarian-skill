@@ -15,8 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from adapters import build_adapter  # noqa: E402
 from adapters.store_sidecar import SidecarAdapter  # noqa: E402
-from lib.config import load_config  # noqa: E402
+from lib.config import load_config, load_vocab  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
+from lib.validate import validate_record  # noqa: E402
 
 
 def main() -> int:
@@ -24,6 +25,9 @@ def main() -> int:
     ap.add_argument("--manifest", default="state/manifest.json")
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--rebuild-only", action="store_true")
+    ap.add_argument("--include-understood", action="store_true",
+                    help="同时入库'已理解但未改名'(understood)的记录,供 run_all --no-rename"
+                         "只读入库使用;入库前会校验受控标签,不合规打回 needs_review")
     ap.add_argument("--input", action="append",
                     help="素材根目录(可重复传入,供 sidecar rebuild 扫描旁车)")
     args = ap.parse_args()
@@ -40,8 +44,26 @@ def main() -> int:
         print("已重建汇总表。")
         return 0
 
-    todo = [record for record in manifest.iter_records() if record.status == "named"]
+    # 正常流程入库 status=named;--include-understood 时也纳入未改名的 understood,
+    # 但对 understood 先校验受控标签(04 改名阶段本会做),不合规的打回 needs_review。
+    wanted = {"named", "understood"} if args.include_understood else {"named"}
+    todo = [record for record in manifest.iter_records() if record.status in wanted]
+    if args.include_understood:
+        vocab = load_vocab()
+        people_cfg = cfg.get("people", {})
+        checked = []
+        for record in todo:
+            if record.status == "understood":
+                issues = validate_record(record.to_dict(), vocab, people_cfg)
+                if issues:
+                    record.status = "needs_review"
+                    manifest.upsert(record)
+                    print(f"  [needs_review] {record.original_name}: {'; '.join(issues)}")
+                    continue
+            checked.append(record)
+        todo = checked
     if not todo:
+        manifest.save()
         print("没有待入库的记录。")
         return 0
 

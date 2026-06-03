@@ -82,6 +82,42 @@ def test_build_record_uses_video_probe(tmp_path, monkeypatch):
     assert record.codec == "h264"
 
 
+def test_is_junk_name_skips_appledouble_and_hidden():
+    scan = _load_scan_module()
+    assert scan.is_junk_name("._IMG_0003_副本.MOV") is True   # macOS 资源叉
+    assert scan.is_junk_name(".DS_Store") is True
+    assert scan.is_junk_name("IMG_0003.MOV") is False
+
+
+def test_detect_media_type_rejects_junk_even_with_media_ext():
+    scan = _load_scan_module()
+    # ._foo.mov 扩展名是 .mov,但属 AppleDouble 资源叉,必须按文件名排除
+    assert scan.detect_media_type(Path("._clip.mov")) is None
+    assert scan.detect_media_type(Path("clip.mov")) == "video"
+    assert scan.detect_media_type(Path("pic.JPG")) == "photo"
+
+
+def test_scan_ignores_appledouble_files(tmp_path):
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "clip.mp4").write_bytes(b"real-video")
+    (media_dir / "._clip.mp4").write_bytes(b"resource-fork")  # 不应入库
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    names = {rec["original_name"] for rec in payload.values()}
+    assert names == {"clip.mp4"}
+    assert "新增 1 条" in result.stdout
+    assert "系统垃圾文件 1 个" in result.stdout
+
+
 def test_build_record_falls_back_to_file_mtime(tmp_path, monkeypatch):
     scan = _load_scan_module()
     photo = tmp_path / "photo.jpg"
