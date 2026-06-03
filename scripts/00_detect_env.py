@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from lib.config import load_config, validate_config  # noqa: E402
 
 
 def check_binary(name: str, hint: str) -> bool:
@@ -47,8 +50,20 @@ def main() -> int:
     print(f"  [{'✓' if cfg_ok else '✗'}] config/config.yaml"
           + ("" if cfg_ok else "  → cp config/config.example.yaml config/config.yaml 并填写"))
 
-    # TODO(GPT-5.4): 若 config 存在,进一步校验模型 key / store 凭证 / 人物名册参考图是否存在
-    all_ok = all(bins) and all(deps) and cfg_ok
+    config_issues: list[str] = []
+    if cfg_ok:
+        try:
+            config_issues = validate_config(load_config(cfg))
+        except Exception as exc:  # noqa: BLE001
+            config_issues = [f"读取配置失败: {exc}"]
+        if config_issues:
+            print("  [✗] 配置校验")
+            for issue in config_issues:
+                print(f"    - {issue}")
+        else:
+            print("  [✓] 配置校验")
+
+    all_ok = all(bins) and all(deps) and cfg_ok and not config_issues
     print("\n结果:", "全部就绪 ✓" if all_ok else "存在缺失,请按上面提示处理 ✗")
     return 0 if all_ok else 1
 
