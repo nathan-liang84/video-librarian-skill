@@ -20,18 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
 from lib.config import load_config, load_vocab  # noqa: E402
 from lib.models import build_vision_model, build_text_model  # noqa: E402
+from lib.people import resolve_people, all_ref_images  # noqa: E402
 
 VISION_FIELDS = ["scene", "subjects", "actions", "shot_type", "camera_move",
                  "mood", "lighting", "quality_score"]
-
-
-def _ref_images(people_cfg: dict) -> list[Path]:
-    refs: list[Path] = []
-    main = (people_cfg or {}).get("main") or {}
-    refs += [Path(p) for p in (main.get("refs") or [])]
-    for c in (people_cfg or {}).get("companions") or []:
-        refs += [Path(p) for p in (c.get("refs") or [])]
-    return [p for p in refs if p.exists()]
 
 
 def _frames_for(record, workdir: Path) -> list[Path]:
@@ -52,8 +44,8 @@ def main() -> int:
 
     cfg = load_config(Path(args.config))
     vocab = load_vocab()
-    people_cfg = cfg.get("people", {})
-    refs = _ref_images(people_cfg)
+    people_cfg = resolve_people(cfg)        # 合并 config + 自动发现 config/refs/
+    refs = all_ref_images(people_cfg)
     conf_thresh = cfg.get("runtime", {}).get("needs_review_confidence", 0.6)
     q_thresh = cfg.get("runtime", {}).get("needs_review_quality", 3)
 

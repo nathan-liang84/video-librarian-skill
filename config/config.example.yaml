@@ -15,19 +15,22 @@ store:
     table_id: ""           # 素材库表 table_id
     # 所需权限见 docs/TASK_BREAKDOWN.md 飞书章节
 
-# ── 模型 ─────────────────────────────────────────────────
+# ── 模型(provider 无关:任何 OpenAI 兼容服务都可用)─────────
+# 安装 skill 后建议由配置引导(见 SKILL.md)带你选择并填写。
+# 已知 provider 有默认 base_url(minimax/qwen/doubao/openai/deepseek);
+# 用其他服务(含本地 ollama/vLLM)只需 provider: local + 自填 base_url。
 models:
-  vision:                  # 看画面:必须支持图像输入
-    provider: minimax
-    model: MiniMax-M3
+  vision:                  # 看画面:【必须支持图像输入】
+    provider: minimax      # minimax | qwen | doubao | openai | local ...
+    model: MiniMax-M3      # 例:Qwen-VL → qwen-vl-plus;豆包 → doubao-vision-pro;OpenAI → gpt-4o
     api_key: ""
-    base_url: "https://api.minimaxi.com/v1"   # 以官方文档为准
+    base_url: ""           # 留空则用 provider 默认;local 必填
     max_frames_per_video: 36
-  text:                    # 纯文本:总结/打标签/脚本匹配(便宜)
+  text:                    # 纯文本:总结/打标签/脚本匹配(选便宜的)
     provider: minimax
-    model: MiniMax-M2.7
+    model: MiniMax-M2.7    # 例:qwen-plus / deepseek-chat / gpt-4o-mini
     api_key: ""
-    base_url: "https://api.minimaxi.com/v1"
+    base_url: ""
   asr:
     provider: faster-whisper   # 本地优先;或 cloud
     model: small               # tiny|base|small|medium|large-v3
@@ -47,20 +50,18 @@ extract:
   make_sprite: true        # 视频生成 3x3 概览雪碧图
 
 # ── 人物名册(v1:主角固定,参考图引导识别)─────────────
+# 参考图按名字【自动发现】:把照片放 config/refs/,命名为 <人名>.jpg 或 <人名>_1.jpg
+# (如 寸寸.jpg / 寸寸_1.jpg / 男朋友_1.png),这里只写人名即可,无需列路径。
+# config/refs/ 已 gitignore,照片只存本地、不上传。
 people:
   main:
-    name: 寸寸
-    refs:                  # 1-2 张参考图(放 config/refs/,已 gitignore)
-      - config/refs/cuncun_1.jpg
-      - config/refs/cuncun_2.jpg
-  companions:              # 固定关系人/宠物,可选附参考图
-    - name: 男朋友
-      refs: [config/refs/bf_1.jpg]
+    name: 寸寸             # 对应 config/refs/寸寸*.jpg
+  companions:              # 固定关系人/宠物(可选)
+    - name: 男朋友          # 对应 config/refs/男朋友*.jpg
     - name: 闺蜜
-      refs: []
     - name: 宠物狗
-      refs: [config/refs/dog_1.jpg]
   # 名册外的人统一记为「多人」;无人记「空镜」
+  # 如需手动指定路径也可:  - {name: 某某, refs: [config/refs/x.jpg]}
 
 # ── 命名规则 ─────────────────────────────────────────────
 naming:

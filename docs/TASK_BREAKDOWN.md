@@ -1,6 +1,6 @@
 # 任务拆解与多模型协作分工
 
-本仓库由多模型协作开发。分工原则:**高难度/需规划推理的部分给 Opus 4.8;常规开发给 GPT-5.4(Codex);代码检查分两层(GPT-5.5 全量 + Opus 4.8 盯高风险)。**
+本仓库由多模型协作开发。分工原则:**高难度/需规划推理的部分给 Opus 4.8;常规开发给 GPT-5.4(Codex);代码检查交叉进行——任何人写的都不由自己终审。**
 
 > 配套文档:产品需求 [PRD.md](../PRD.md) · 技能说明 [SKILL.md](../SKILL.md) · 数据契约 [schema/record.schema.json](../schema/record.schema.json)
 
@@ -10,27 +10,32 @@
 |------|------|---------|
 | 架构师 / 智能环节 | **Opus 4.8** | 接口契约、提示词工程、命名/改名安全、脚本匹配策略、成本策略、高风险评审 |
 | 开发 | **GPT-5.4(Codex)** | 常规工程:盘点、抽取、ASR、数据层适配器、状态/配置工具、打包 |
-| 代码检查(全量) | **GPT-5.5** | 所有 PR 的常规 review(风格、边界、错误处理、测试) |
-| 代码检查(高风险) | **Opus 4.8** | 仅高风险模块的终审(见下表 ⚠️) |
+| 代码检查 | **GPT-5.5(extra high)** | **复审 Opus 写的全部模块**;以及 Codex PR 的全量 review |
+| 代码检查(高风险) | **Opus 4.8** | 复审 Codex 写的高风险模块(见下表 ⚠️);**不审自己写的** |
 
-> 评审第一原则:**审查者 ≠ 作者**。Codex 写的不让 Codex 终审;高风险正确性由 Opus 终审。
+> 评审第一原则:**审查者 ≠ 作者**。
+> - Codex 写的 → GPT-5.5 全量 + Opus 终审高风险项。
+> - **Opus 写的 → GPT-5.5(extra high)复审**(Opus 不自审)。评审清单见 [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md)。
 
 ## 模块分工表
 
 | 模块 | 文件 | 负责开发 | 终审 | 难度/原因 |
 |------|------|:---:|:---:|------|
-| 数据契约 / 记录模型 | `schema/record.schema.json`、`lib/record.py` | Opus | GPT-5.5 | 跨阶段共享契约,定错全盘返工 |
-| 状态清单(断点续跑/幂等) | `lib/manifest.py` | GPT-5.4 | ⚠️ Opus | 幂等与原子写,错了会重复扣费/损坏状态 |
-| 配置/词表加载与校验 | `lib/config.py` | GPT-5.4 | GPT-5.5 | 常规 |
-| 模型客户端抽象 | `lib/models.py` | Opus | GPT-5.5 | 解耦设计,影响后续可换模型 |
+| 数据契约 / 记录模型 | `schema/record.schema.json`、`lib/record.py` | Opus | GPT-5.5 ✦ | 跨阶段共享契约,定错全盘返工 |
+| 状态清单(断点续跑/幂等) | `lib/manifest.py` | Opus(初版) | GPT-5.5 ✦ | 幂等与原子写,错了会重复扣费/损坏状态 |
+| 配置/词表加载与校验 | `lib/config.py` | GPT-5.4 | GPT-5.5 | validate_config 待补 |
+| 模型客户端抽象 | `lib/models.py` | Opus | GPT-5.5 ✦ | provider 无关 OpenAI 兼容,影响可换模型 |
+| 人物名册 / 参考图发现 | `lib/people.py` | Opus | GPT-5.5 ✦ | 自动认领参考图 |
 | 环境自检 | `scripts/00_detect_env.py` | GPT-5.4 | GPT-5.5 | 常规 |
 | 盘点 + 指纹 + 元数据 | `scripts/01_scan.py` | GPT-5.4 | ⚠️ Opus | 指纹去重正确性影响全局幂等 |
 | 抽帧 + 音轨 + ASR + 缩略图 | `scripts/02_extract.py` | GPT-5.4 | GPT-5.5 | 工程量大但常规 |
-| **内容理解(M3+M2.7 融合)** | `scripts/03_understand.py`、`prompts/` | **Opus** | GPT-5.5 | 提示词工程 + 受控枚举约束 + JSON 稳定性 |
-| **标签校验 + 命名 + 安全改名** | `scripts/04_tag_name.py` | **Opus** | ⚠️ Opus(自审+GPT-5.5) | 改名不可逆,回滚必须万无一失 |
+| **内容理解(M3+M2.7 融合)** | `scripts/03_understand.py`、`prompts/` | **Opus** | GPT-5.5 ✦ | 提示词工程 + 受控枚举约束 + JSON 稳定性 |
+| **标签校验 + 命名 + 安全改名** | `scripts/04_tag_name.py`、`lib/naming.py`、`lib/validate.py` | **Opus** | GPT-5.5 ✦ | 改名不可逆,回滚必须万无一失 |
 | 数据层适配器 | `adapters/*.py` | GPT-5.4 | GPT-5.5 | 飞书 API / Excel 写入,常规 |
-| **脚本匹配检索** | `scripts/06_match.py` | **Opus** | GPT-5.5 | 解析 + 硬过滤 + 语义排序策略 |
-| 成本两档策略 | 贯穿 03/模型层 | Opus | GPT-5.5 | 控成本逻辑 |
+| **脚本匹配检索** | `scripts/06_match.py` | **Opus** | GPT-5.5 ✦ | 解析 + 硬过滤 + 语义排序策略 |
+| 成本两档策略 | 贯穿 03/模型层 | Opus | GPT-5.5 ✦ | 控成本逻辑 |
+
+> ✦ = Opus 写的模块,需 **GPT-5.5(extra high)复审**(任务见 REVIEW_CHECKLIST.md 与对应 GitHub Issue)。
 | 串跑入口 | `scripts/run_all.py`(待建) | GPT-5.4 | GPT-5.5 | 常规 |
 | 测试 | `tests/` | 各自模块作者 | 对方 | — |
 

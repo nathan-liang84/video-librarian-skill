@@ -122,7 +122,9 @@ def _roster_text(roster: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-class MiniMaxVision(VisionModel):
+class VisionChatModel(VisionModel):
+    """通用 OpenAI 兼容多模态模型(MiniMax M3 / Qwen-VL / 豆包 / GPT-4o 等)。"""
+
     def __init__(self, client: _ChatClient):
         self.client = client
         self.tmpl = load_prompt("understand_vision.md")
@@ -147,7 +149,9 @@ class MiniMaxVision(VisionModel):
         return _extract_json(self.client.chat(messages))
 
 
-class MiniMaxText(TextModel):
+class TextChatModel(TextModel):
+    """通用 OpenAI 兼容文本模型(MiniMax M2.7 / Qwen / DeepSeek / GPT 等)。"""
+
     def __init__(self, client: _ChatClient):
         self.client = client
 
@@ -175,21 +179,39 @@ class MiniMaxText(TextModel):
                          CANDIDATES=json.dumps(candidates, ensure_ascii=False))
 
 
-# ── 工厂 ───────────────────────────────────────────────
-def _client_from(cfg_section: dict[str, Any]) -> _ChatClient:
-    return _ChatClient(cfg_section["model"], cfg_section["api_key"],
-                       cfg_section["base_url"])
+# ── 工厂(provider 无关:任何 OpenAI 兼容端点均可)──────────
+# 已知 provider 的默认 base_url;config 里显式写了 base_url 则以 config 为准。
+PROVIDER_DEFAULTS = {
+    "minimax": "https://api.minimaxi.com/v1",
+    "qwen":    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "doubao":  "https://ark.cn-beijing.volces.com/api/v3",
+    "openai":  "https://api.openai.com/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    # 本地(ollama / vLLM 等):provider: local, base_url 自填
+}
+
+
+def _client_from(section: dict[str, Any]) -> _ChatClient:
+    for key in ("model", "api_key"):
+        if not section.get(key):
+            raise ValueError(
+                f"模型配置缺少 '{key}'。请在 config.yaml 的对应 models 段填写"
+                f"(或运行配置引导,见 SKILL.md)。"
+            )
+    base_url = section.get("base_url") or PROVIDER_DEFAULTS.get(section.get("provider"))
+    if not base_url:
+        raise ValueError(
+            f"未知 provider '{section.get('provider')}' 且未提供 base_url。"
+            f"任何 OpenAI 兼容服务都可用:填 provider + base_url + model + api_key 即可。"
+        )
+    return _ChatClient(section["model"], section["api_key"], base_url)
 
 
 def build_vision_model(cfg: dict[str, Any]) -> VisionModel:
-    section = cfg["models"]["vision"]
-    if section.get("provider") == "minimax":
-        return MiniMaxVision(_client_from(section))
-    raise ValueError(f"未知 vision provider: {section.get('provider')}")
+    """构建"看画面"模型。要求支持图像输入(多模态)。"""
+    return VisionChatModel(_client_from(cfg["models"]["vision"]))
 
 
 def build_text_model(cfg: dict[str, Any]) -> TextModel:
-    section = cfg["models"]["text"]
-    if section.get("provider") == "minimax":
-        return MiniMaxText(_client_from(section))
-    raise ValueError(f"未知 text provider: {section.get('provider')}")
+    """构建"处理文本"模型(可与 vision 同 provider 或不同)。"""
+    return TextChatModel(_client_from(cfg["models"]["text"]))
