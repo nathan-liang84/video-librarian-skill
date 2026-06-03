@@ -34,6 +34,14 @@ def _frames_for(record, workdir: Path) -> list[Path]:
     return sorted(fdir.glob("*.jpg")) if fdir.exists() else []
 
 
+def _subsample(frames: list[Path], cap: int) -> list[Path]:
+    """把帧均匀降采样到 cap 张以内(控成本)。照片/少帧时原样返回。"""
+    if cap <= 0 or len(frames) <= cap:
+        return frames
+    step = len(frames) / cap
+    return [frames[int(i * step)] for i in range(cap)]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default="state/manifest.json")
@@ -49,17 +57,26 @@ def main() -> int:
     conf_thresh = cfg.get("runtime", {}).get("needs_review_confidence", 0.6)
     q_thresh = cfg.get("runtime", {}).get("needs_review_quality", 3)
 
+    # 成本两档:quick=快扫(少帧,处理全部 extracted);refine=精修(多帧,只重跑 needs_review)
+    tier = args.tier or cfg.get("cost_tier", "quick")
+    full_cap = cfg.get("models", {}).get("vision", {}).get("max_frames_per_video", 36)
+    quick_cap = cfg.get("runtime", {}).get("quick_max_frames", 4)
+    frame_cap = quick_cap if tier == "quick" else full_cap
+
     vision = build_vision_model(cfg)
     text = build_text_model(cfg)
 
     manifest = Manifest(Path(args.manifest)).load()
-    todo = [r for r in manifest.iter_records() if r.status == "extracted"]
+    target_status = "extracted" if tier == "quick" else "needs_review"
+    todo = [r for r in manifest.iter_records() if r.status == target_status]
     if not todo:
-        print("没有待理解的记录(需先完成 02_extract)。")
+        print(f"[{tier}] 没有待处理的记录"
+              f"({'需先完成 02_extract' if tier=='quick' else '无 needs_review 项'})。")
         return 0
+    print(f"[{tier}] 处理 {len(todo)} 条,每条最多用 {frame_cap} 帧。")
 
     for r in todo:
-        frames = _frames_for(r, Path(args.workdir))
+        frames = _subsample(_frames_for(r, Path(args.workdir)), frame_cap)
         if not frames:
             r.status = "failed"
             manifest.upsert(r)

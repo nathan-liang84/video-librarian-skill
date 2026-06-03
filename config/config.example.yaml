@@ -79,3 +79,4 @@ runtime:
   concurrency: 4
   needs_review_confidence: 0.6
   needs_review_quality: 3
+  quick_max_frames: 4      # quick 档每个视频最多送多少帧给多模态(控成本);refine 档用 max_frames_per_video

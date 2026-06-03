@@ -41,20 +41,31 @@ def _data_url(path: Path) -> str:
 
 
 def _extract_json(text: str) -> Any:
-    """从模型输出里稳健地抽 JSON(容忍 ```json 包裹、前后噪声)。"""
+    """从模型输出里稳健地抽 JSON。
+
+    容忍:① 推理模型的 <think>...</think> 块(MiniMax M3/M2.7 都会输出);
+         ② ```json 代码块包裹;③ 前后噪声文字。
+    """
     text = text.strip()
+    # 1) 去掉推理块(成对的优先;残留的开/闭标签再清一遍)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = text.replace("<think>", "").replace("</think>", "").strip()
+    # 2) 去代码块围栏
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # 退化:截取第一个 { 或 [ 到最后一个 } 或 ]
-        for open_c, close_c in (("[", "]"), ("{", "}")):
+        # 退化:取最外层(最先出现的)括号片段;按开括号位置排序,避免把对象内的子数组误当结果
+        cands: list[tuple[int, str]] = []
+        for open_c, close_c in (("{", "}"), ("[", "]")):
             i, j = text.find(open_c), text.rfind(close_c)
             if i != -1 and j > i:
-                try:
-                    return json.loads(text[i:j + 1])
-                except json.JSONDecodeError:
-                    continue
+                cands.append((i, text[i:j + 1]))
+        for _, frag in sorted(cands):
+            try:
+                return json.loads(frag)
+            except json.JSONDecodeError:
+                continue
         raise
 
 
@@ -156,9 +167,12 @@ class TextChatModel(TextModel):
         self.client = client
 
     def _run(self, prompt_file: str, **kw) -> Any:
-        sys_prompt = fill(load_prompt(prompt_file), **kw)
-        return _extract_json(self.client.chat(
-            [{"role": "system", "content": sys_prompt}]))
+        # 注意:部分服务(MiniMax)要求必须有 user 消息,仅 system 会 400。
+        prompt = fill(load_prompt(prompt_file), **kw)
+        return _extract_json(self.client.chat([
+            {"role": "system", "content": "严格按指令执行,只输出 JSON,不要多余文字。"},
+            {"role": "user", "content": prompt},
+        ]))
 
     def summarize_and_tag(self, *, vision_result, transcript, metadata, vocab):
         return self._run("understand_text.md",
