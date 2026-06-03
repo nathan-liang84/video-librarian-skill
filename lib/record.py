@@ -52,6 +52,9 @@ class Record:
     mood: list[str] = field(default_factory=list)
     lighting: Optional[str] = None
     quality_score: Optional[float] = None
+    # 人物识别可信度(尤其没露脸时):0-1;basis=face|appearance|inferred|none
+    subject_confidence: Optional[float] = None
+    subject_basis: Optional[str] = None
     has_speech: Optional[bool] = None
     transcript: Optional[str] = None
     usable_clips: list[dict] = field(default_factory=list)

@@ -52,18 +52,18 @@ def _extract_json(text: str) -> Any:
     text = text.replace("<think>", "").replace("</think>", "").strip()
     # 2) 去代码块围栏
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+    decoder = json.JSONDecoder()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # 退化:取最外层(最先出现的)括号片段;按开括号位置排序,避免把对象内的子数组误当结果
-        cands: list[tuple[int, str]] = []
-        for open_c, close_c in (("{", "}"), ("[", "]")):
-            i, j = text.find(open_c), text.rfind(close_c)
-            if i != -1 and j > i:
-                cands.append((i, text[i:j + 1]))
-        for _, frag in sorted(cands):
+        # 退化:从左到右寻找第一个可完整解码的 JSON 值,容忍尾随解释/第二段 JSON。
+        cands = sorted(
+            {i for open_c in ("{", "[") for i in range(len(text)) if text[i] == open_c}
+        )
+        for idx in cands:
             try:
-                return json.loads(frag)
+                value, _ = decoder.raw_decode(text[idx:])
+                return value
             except json.JSONDecodeError:
                 continue
         raise
@@ -130,14 +130,25 @@ class TextModel(ABC):
 
 
 # ── MiniMax 实现 ───────────────────────────────────────
-def _roster_text(roster: dict[str, Any]) -> str:
+def _roster_text(roster: dict[str, Any], *, for_vision: bool = False) -> str:
+    roster = roster or {}
+    main = roster.get("main") or {}
+    main_name = main.get("name")
     lines = []
-    main = (roster or {}).get("main") or {}
-    if main.get("name"):
-        lines.append(f"- 主角:{main['name']}(见参考图)")
-    for c in (roster or {}).get("companions") or []:
+    if main_name:
+        hint = roster.get("main_recognition_hint") or main.get("recognition_hint")
+        extra = f";外观特征:{hint}" if (for_vision and hint) else ""
+        lines.append(f"- 主角:{main_name}(见参考图{extra})")
+    for c in roster.get("companions") or []:
         lines.append(f"- {c.get('name','')}")
     lines.append("- 名册外的人 → 多人;无人 → 空镜")
+    # 主角先验(仅视觉理解时启用):没露脸/拿不准时,不要直接判纯"多人"而漏掉主角
+    if for_vision and roster.get("bias_to_main") and main_name:
+        lines.append(
+            f"- 【主角先验】本库以「{main_name}」为核心。画面中有人但你无法确认身份、"
+            f"且【无法排除】其中含「{main_name}」时,宁可输出含「{main_name}」的结果并给"
+            f"低 subject_confidence(0.3-0.5)、subject_basis='inferred',也不要直接判为纯"
+            f"「多人」而漏掉。能明确是别人则照常判「多人」。")
     return "\n".join(lines)
 
 
@@ -151,7 +162,7 @@ class VisionChatModel(VisionModel):
     def analyze(self, frames, *, vocab, people_roster, ref_images=None,
                 media_type="video"):
         sys_prompt = fill(self.tmpl,
-                          ROSTER=_roster_text(people_roster),
+                          ROSTER=_roster_text(people_roster, for_vision=True),
                           VOCAB=json.dumps(vocab, ensure_ascii=False, indent=2),
                           MEDIA_TYPE=media_type,
                           FRAME_COUNT=str(len(frames)))
