@@ -40,3 +40,13 @@ def test_array_output():
 def test_noise_around_json():
     out = '好的,结果如下:{"a": [1,2]} 以上。'
     assert _extract_json(out) == {"a": [1, 2]}
+
+
+def test_first_json_when_second_json_trails():
+    out = '{"summary": "通过"}\n{"debug": true}'
+    assert _extract_json(out) == {"summary": "通过"}
+
+
+def test_first_array_when_json_trails():
+    out = '[{"shot_no": 1}]\n补充说明\n{"debug": true}'
+    assert _extract_json(out) == [{"shot_no": 1}]
