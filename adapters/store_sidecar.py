@@ -27,6 +27,13 @@ class SidecarAdapter(StoreAdapter):
         self.output_dir = Path(sc["output_dir"])
         self.summary_file = sc.get("summary_file", "_素材总表.xlsx")
         self.index_path = self.output_dir / INDEX_FILE
+        media_root = sc.get("media_root")
+        media_roots = sc.get("media_roots") or []
+        configured_roots = []
+        if media_root:
+            configured_roots.append(media_root)
+        configured_roots.extend(media_roots)
+        self.media_roots = [Path(root) for root in configured_roots]
 
     def _sidecar_path(self, record: Record) -> Path:
         media_path = Path(record.path)
@@ -45,8 +52,10 @@ class SidecarAdapter(StoreAdapter):
             encoding="utf-8",
         )
 
-    def _discover_sidecars(self) -> list[Path]:
-        roots = [self.output_dir.parent]
+    def _discover_sidecars(self, scan_roots: list[Path] | None = None) -> list[Path]:
+        roots = list(scan_roots or self.media_roots)
+        if not roots:
+            roots.extend(Path(path).parent for path in self._load_index())
         sidecars: list[Path] = []
         seen: set[Path] = set()
         for root in roots:
@@ -77,9 +86,9 @@ class SidecarAdapter(StoreAdapter):
             index.add(str(sidecar_path))
         self._save_index(list(index))
 
-    def rebuild_summary(self) -> None:
+    def rebuild_summary(self, scan_roots: list[Path] | None = None) -> None:
         records = []
-        for path in self._discover_sidecars():
+        for path in self._discover_sidecars(scan_roots):
             record = self._read_record(path)
             if record is not None:
                 records.append(record)

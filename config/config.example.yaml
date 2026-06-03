@@ -7,6 +7,7 @@ store:
   sidecar:
     output_dir: ./output   # 旁车 JSON 与 _素材总表.xlsx 输出位置
     summary_file: _素材总表.xlsx
+    media_root: ""         # 可选:素材根目录;rebuild-only 时用于扫描素材旁车
     thumb_dirname: .thumbs # 缩略图存放子目录(与素材同级)
   feishu:
     app_id: ""             # 飞书自建应用 App ID

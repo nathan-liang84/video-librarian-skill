@@ -17,6 +17,7 @@ def _cfg(tmp_path: Path, mode: str = "sidecar") -> dict:
             "sidecar": {
                 "output_dir": str(tmp_path / "output"),
                 "summary_file": "_素材总表.xlsx",
+                "media_root": str(tmp_path / "media"),
             },
             "feishu": {
                 "app_id": "a",
@@ -87,3 +88,31 @@ def test_rebuild_summary_scans_sidecars_without_index(tmp_path):
     adapter.rebuild_summary()
 
     assert (tmp_path / "output" / "_素材总表.xlsx").exists()
+
+
+def test_rebuild_summary_supports_external_media_root(tmp_path):
+    media_dir = tmp_path / "external-media"
+    media_dir.mkdir()
+    sidecar = media_dir / "clip.json"
+    sidecar.write_text(
+        json.dumps(
+            {
+                "id": "r3",
+                "media_type": "video",
+                "original_name": "clip.mp4",
+                "path": str(media_dir / "clip.mp4"),
+                "status": "stored",
+                "schema_version": "1.0.0",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    cfg = _cfg(tmp_path)
+    cfg["store"]["sidecar"]["output_dir"] = str(tmp_path / "separate-output")
+    cfg["store"]["sidecar"]["media_root"] = ""
+    adapter = SidecarAdapter(cfg)
+
+    adapter.rebuild_summary(scan_roots=[media_dir])
+
+    assert (tmp_path / "separate-output" / "_素材总表.xlsx").exists()

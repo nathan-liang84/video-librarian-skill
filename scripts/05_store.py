@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from adapters import build_adapter  # noqa: E402
+from adapters.store_sidecar import SidecarAdapter  # noqa: E402
 from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
 
@@ -23,13 +24,19 @@ def main() -> int:
     ap.add_argument("--manifest", default="state/manifest.json")
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--rebuild-only", action="store_true")
+    ap.add_argument("--input", action="append",
+                    help="素材根目录(可重复传入,供 sidecar rebuild 扫描旁车)")
     args = ap.parse_args()
 
     cfg = load_config(Path(args.config))
     adapter = build_adapter(cfg)
     manifest = Manifest(Path(args.manifest)).load()
     if args.rebuild_only:
-        adapter.rebuild_summary()
+        if isinstance(adapter, SidecarAdapter):
+            scan_roots = [Path(path).resolve() for path in (args.input or [])]
+            adapter.rebuild_summary(scan_roots=scan_roots or None)
+        else:
+            adapter.rebuild_summary()
         print("已重建汇总表。")
         return 0
 
@@ -42,7 +49,11 @@ def main() -> int:
         record.status = "stored"
         manifest.upsert(record)
     adapter.upsert_records(todo)
-    adapter.rebuild_summary()
+    if isinstance(adapter, SidecarAdapter):
+        scan_roots = [Path(path).resolve() for path in (args.input or [])]
+        adapter.rebuild_summary(scan_roots=scan_roots or None)
+    else:
+        adapter.rebuild_summary()
     manifest.save()
     print(f"已入库 {len(todo)} 条记录。")
     return 0
