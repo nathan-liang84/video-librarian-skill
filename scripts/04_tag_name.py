@@ -67,6 +67,18 @@ def do_rollback() -> int:
             skipped += 1
             continue
         if old_p.exists():
+            # 崩溃窗口:os.link 成功但 os.unlink 未执行 → old 和 new 指向同一 inode
+            # applied=False 且 samefile → 安全删掉 new(孤立硬链接),还原到 old
+            if not entry.get("applied", True) and new_p.exists():
+                try:
+                    if os.path.samefile(old_p, new_p):
+                        os.unlink(new_p)
+                        remaining.remove(entry)
+                        print(f"  ↩ [清理孤立链接] 删除 {new_p.name},保留 {old_p.name}")
+                        restored += 1
+                        continue
+                except OSError:
+                    pass
             print(f"  [跳过] 原路径已被占用,避免覆盖:{old_p}")
             skipped += 1
             continue
