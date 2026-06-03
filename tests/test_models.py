@@ -73,6 +73,18 @@ def test_truncated_json_raises():
         _extract_json('{"scene": ["健身房"], "subjects": ["寸寸"')
 
 
+def test_truncated_outer_with_complete_inner_array_raises():
+    # review P1:仅截掉外层闭合、内层数组完整时,绝不能误返回内层片段 ['健身房']
+    with pytest.raises(ValueError):
+        _extract_json('{"scene": ["健身房"]')
+
+
+def test_truncated_outer_with_complete_inner_object_raises():
+    # 同上:'{"a": {"b": 1}' 不能误返回 {'b': 1}
+    with pytest.raises(ValueError):
+        _extract_json('{"a": {"b": 1}')
+
+
 def test_empty_response_raises():
     with pytest.raises(ValueError) as ei:
         _extract_json("   ")

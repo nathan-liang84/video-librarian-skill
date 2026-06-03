@@ -75,4 +75,7 @@ def test_run_all_no_rename_skips_04_runs_05(monkeypatch, capsys):
     assert "04_tag_name.py" not in names      # 只读:绝不改名
     assert names == ["00_detect_env.py", "01_scan.py", "02_extract.py",
                      "03_understand.py", "05_store.py"]
+    # 关键:05 必须带 --include-understood,否则 understood 记录入不了库(review P1)
+    store_args = next(args for name, args in calls if name == "05_store.py")
+    assert "--include-understood" in store_args
     assert "未改动" in capsys.readouterr().out

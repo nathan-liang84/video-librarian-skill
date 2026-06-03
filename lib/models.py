@@ -46,10 +46,10 @@ _JSON_MISS = object()
 def _scan_json(text: str) -> Any:
     """稳健抽取首个顶层 JSON 值。找不到返回 _JSON_MISS(以区别合法的 null)。
 
-    策略:① 整体 json.loads;② 从【第一个】括号 raw_decode——它失败通常意味着顶层被
-    截断/损坏,此时【不再向内抓取子片段】(否则截断会误返回内层数组/对象);③ 仅当真
-    JSON 前有杂乱括号(如 "见[下]:{...}")时,才接受后续括号,且要求其几乎消费到结尾,
-    避免把截断的内层片段当成结果。"""
+    策略:① 整体 json.loads;② 从【第一个】括号 raw_decode(容忍尾随解释/第二段 JSON)。
+    第一个括号若解不出,说明顶层被截断/损坏——【绝不向内或向后抓子片段】,直接判失败。
+    否则截断的外层会被误当成内层的完整片段返回(如 '{"scene":["健身房"]' → ['健身房']、
+    '{"a":{"b":1}' → {'b':1}),把半截结果悄悄当成功。宁可判失败,让上层看到原始输出。"""
     decoder = json.JSONDecoder()
     try:
         return json.loads(text)
@@ -62,16 +62,7 @@ def _scan_json(text: str) -> Any:
         value, _ = decoder.raw_decode(text[first:])
         return value
     except json.JSONDecodeError:
-        pass
-    for idx in range(first + 1, len(text)):
-        if text[idx] in "{[":
-            try:
-                value, end = decoder.raw_decode(text[idx:])
-            except json.JSONDecodeError:
-                continue
-            if len(text[idx + end:].strip()) <= 5:   # 后面几乎没剩 → 是真结果,非截断片段
-                return value
-    return _JSON_MISS
+        return _JSON_MISS
 
 
 def _extract_json(text: str) -> Any:

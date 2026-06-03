@@ -51,8 +51,10 @@ def main() -> int:
     _run("03_understand.py", *understand_args)
 
     # 只读模式:不碰原文件名,直接入库(写旁车/总表),把"内容总结 + 地址位置"留存下来。
+    # understood 记录不会自动变 named,故须用 --include-understood 让 05 也校验并入库它们。
     if args.no_rename:
-        _run("05_store.py", "--manifest", args.manifest, "--config", args.config)
+        _run("05_store.py", "--manifest", args.manifest, "--config", args.config,
+             "--include-understood")
         print("\n已完成:读取 + 总结 + 入库(旁车/总表),未改动任何原文件名。")
         return 0
 
