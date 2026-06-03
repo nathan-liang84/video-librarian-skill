@@ -39,14 +39,24 @@ def _subject_atoms(subjects) -> set:
 
 def is_tentative_main(record, people_cfg: dict, conf_thresh: float) -> bool:
     """主角先验:开启 bias_to_main 且主角被推断进 subjects 但身份把握低 → 待人工确认。
-    needs_review 不参与 04 命名与 06 匹配,因此未确认的身份不会进文件名/匹配结果。"""
+    needs_review 不参与 04 命名与 06 匹配,因此未确认的身份不会进文件名/匹配结果。
+
+    身份依据(subject_basis)是关键:
+      - inferred/appearance(没露脸靠先验或外观推断)→ 即使模型漏给 confidence,
+        也保守送审,绝不让"没确认的没露脸主角"溜进 understood。
+      - face/未知依据 → 仅当 confidence 明确偏低才送审;缺 confidence 不臆断。"""
     main_name = (people_cfg.get("main") or {}).get("name")
-    return bool(
-        people_cfg.get("bias_to_main") and main_name
-        and main_name in _subject_atoms(getattr(record, "subjects", None))
-        and record.subject_confidence is not None
-        and record.subject_confidence < conf_thresh
-    )
+    if not (people_cfg.get("bias_to_main") and main_name):
+        return False
+    if main_name not in _subject_atoms(getattr(record, "subjects", None)):
+        return False
+    conf = record.subject_confidence
+    basis = (record.subject_basis or "").lower()
+    if basis in ("inferred", "appearance"):     # 非面部推断:缺可信度也要送审
+        return conf is None or conf < conf_thresh
+    if conf is None:                            # 面部/未知依据且无可信度 → 不臆断
+        return False
+    return conf < conf_thresh
 
 
 def _frames_for(record, workdir: Path) -> list[Path]:

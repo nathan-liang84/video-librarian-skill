@@ -21,6 +21,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
+from lib.config import load_config, load_vocab  # noqa: E402
+from lib.validate import validate_record  # noqa: E402
 
 
 def _fmt(r) -> str:
@@ -34,6 +36,7 @@ def _fmt(r) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="复核 needs_review 记录")
     ap.add_argument("--manifest", default="state/manifest.json")
+    ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--list", action="store_true", help="列出所有 needs_review")
     ap.add_argument("--confirm", metavar="ID", help="确认某条(或 all)→ understood")
     ap.add_argument("--subjects", help="确认时修正人物(用「和」连接,如 寸寸和闺蜜)")
@@ -65,8 +68,22 @@ def main() -> int:
             print(f"未找到 needs_review 记录:{args.confirm}")
             return 2
 
+    vocab = people_cfg = None
+    if args.subjects:                          # 仅在需要改人物时才加载校验依据
+        cfg = load_config(Path(args.config))
+        vocab = load_vocab()
+        people_cfg = cfg.get("people", {})
+
+    confirmed = 0
     for r in targets:
         if args.subjects:
+            # 先在副本上校验,合规才落到记录上,避免把脏值写进 manifest
+            candidate = r.to_dict()
+            candidate["subjects"] = [args.subjects]
+            issues = validate_record(candidate, vocab, people_cfg)
+            if issues:
+                print(f"  ✗ 未确认 {r.id}:{'; '.join(issues)}")
+                continue
             r.subjects = [args.subjects]
             r.subject_basis = "face"          # 人工确认即权威依据
             r.subject_confidence = 1.0
@@ -75,10 +92,12 @@ def main() -> int:
             r.subject_basis = r.subject_basis or "face"
         r.status = "understood"
         manifest.upsert(r)
+        confirmed += 1
         print(f"  ✓ 已确认 {r.new_name or r.original_name} → understood "
               f"(subjects={r.subjects})")
-    manifest.save()
-    print(f"\n确认 {len(targets)} 条。可继续:python scripts/04_tag_name.py 重新命名。")
+    if confirmed:
+        manifest.save()
+    print(f"\n确认 {confirmed} 条。可继续:python scripts/04_tag_name.py 重新命名。")
     return 0
 
 
