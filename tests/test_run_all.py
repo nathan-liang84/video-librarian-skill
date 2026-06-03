@@ -59,3 +59,20 @@ def test_run_all_apply_continues_to_store(monkeypatch):
     assert mod.main() == 0
     assert [name for name, _ in calls][-2:] == ["04_tag_name.py", "05_store.py"]
     assert any("--apply" in args for _, args in calls)
+
+
+def test_run_all_no_rename_skips_04_runs_05(monkeypatch, capsys):
+    mod = _load_run_all_module()
+    calls = []
+
+    monkeypatch.setattr(
+        mod, "_run", lambda script, *args: calls.append((script, list(args))))
+    monkeypatch.setattr(
+        sys, "argv", ["run_all.py", "--input", "/tmp/media", "--no-rename"])
+
+    assert mod.main() == 0
+    names = [name for name, _ in calls]
+    assert "04_tag_name.py" not in names      # 只读:绝不改名
+    assert names == ["00_detect_env.py", "01_scan.py", "02_extract.py",
+                     "03_understand.py", "05_store.py"]
+    assert "未改动" in capsys.readouterr().out

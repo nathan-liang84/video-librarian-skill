@@ -29,6 +29,9 @@ def main() -> int:
     ap.add_argument("--tier", choices=["quick", "refine"], default=None)
     ap.add_argument("--apply-rename", action="store_true",
                     help="确认 dry-run 结果后,真正执行改名并继续入库")
+    ap.add_argument("--no-rename", action="store_true",
+                    help="只读取+总结+入库(写旁车/总表),绝不改名原文件。"
+                         "适合外接盘/只读素材:01→02→03→05,跳过 04 改名")
     args = ap.parse_args()
 
     _run("00_detect_env.py")
@@ -46,6 +49,12 @@ def main() -> int:
     if args.tier:
         understand_args += ["--tier", args.tier]
     _run("03_understand.py", *understand_args)
+
+    # 只读模式:不碰原文件名,直接入库(写旁车/总表),把"内容总结 + 地址位置"留存下来。
+    if args.no_rename:
+        _run("05_store.py", "--manifest", args.manifest, "--config", args.config)
+        print("\n已完成:读取 + 总结 + 入库(旁车/总表),未改动任何原文件名。")
+        return 0
 
     _run("04_tag_name.py", "--manifest", args.manifest, "--config", args.config)
     if not args.apply_rename:

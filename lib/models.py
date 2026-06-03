@@ -40,41 +40,84 @@ def _data_url(path: Path) -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def _extract_json(text: str) -> Any:
-    """从模型输出里稳健地抽 JSON。
+_JSON_MISS = object()
 
-    容忍:① 推理模型的 <think>...</think> 块(MiniMax M3/M2.7 都会输出);
-         ② ```json 代码块包裹;③ 前后噪声文字。
-    """
-    text = text.strip()
-    # 1) 去掉推理块(成对的优先;残留的开/闭标签再清一遍)
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    text = text.replace("<think>", "").replace("</think>", "").strip()
-    # 2) 去代码块围栏
-    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+
+def _scan_json(text: str) -> Any:
+    """稳健抽取首个顶层 JSON 值。找不到返回 _JSON_MISS(以区别合法的 null)。
+
+    策略:① 整体 json.loads;② 从【第一个】括号 raw_decode——它失败通常意味着顶层被
+    截断/损坏,此时【不再向内抓取子片段】(否则截断会误返回内层数组/对象);③ 仅当真
+    JSON 前有杂乱括号(如 "见[下]:{...}")时,才接受后续括号,且要求其几乎消费到结尾,
+    避免把截断的内层片段当成结果。"""
     decoder = json.JSONDecoder()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # 退化:从左到右寻找第一个可完整解码的 JSON 值,容忍尾随解释/第二段 JSON。
-        cands = sorted(
-            {i for open_c in ("{", "[") for i in range(len(text)) if text[i] == open_c}
-        )
-        for idx in cands:
+        pass
+    first = next((i for i, c in enumerate(text) if c in "{["), None)
+    if first is None:
+        return _JSON_MISS
+    try:
+        value, _ = decoder.raw_decode(text[first:])
+        return value
+    except json.JSONDecodeError:
+        pass
+    for idx in range(first + 1, len(text)):
+        if text[idx] in "{[":
             try:
-                value, _ = decoder.raw_decode(text[idx:])
-                return value
+                value, end = decoder.raw_decode(text[idx:])
             except json.JSONDecodeError:
                 continue
-        raise
+            if len(text[idx + end:].strip()) <= 5:   # 后面几乎没剩 → 是真结果,非截断片段
+                return value
+    return _JSON_MISS
+
+
+def _extract_json(text: str) -> Any:
+    """从模型输出里稳健地抽 JSON。
+
+    容忍:① 推理模型的 <think>...</think> 块(MiniMax M3/M2.7 都会输出);
+         ② ```json 代码块包裹;③ 前后噪声文字;④ 对象/数组的尾随逗号。
+    彻底失败时抛出携带【原始输出片段】的 ValueError,便于区分"被截断 / 输出了纯文本 /
+    空响应",而不是丢一个无信息的 JSONDecodeError。
+    """
+    raw = text
+    cleaned = text.strip()
+    # 1) 去掉推理块(成对的优先;残留的开/闭标签再清一遍)
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL)
+    cleaned = cleaned.replace("<think>", "").replace("</think>", "").strip()
+    # 2) 去代码块围栏
+    cleaned = re.sub(r"^```(?:json)?|```$", "", cleaned, flags=re.MULTILINE).strip()
+
+    value = _scan_json(cleaned)
+    if value is not _JSON_MISS:
+        return value
+    # 3) 轻修复:去掉对象/数组里的尾随逗号(LLM 常见错误)后再试
+    repaired = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+    if repaired != cleaned:
+        value = _scan_json(repaired)
+        if value is not _JSON_MISS:
+            return value
+    # 4) 放弃:带上原始输出,定位截断/纯文本/空响应
+    snippet = (raw or "").strip()[:500] or "(空响应)"
+    raise ValueError(
+        "模型未返回可解析的 JSON(可能被截断、输出了解释性文字或空响应)。"
+        f"原始输出前 500 字:\n{snippet}")
 
 
 # ── 底层 chat 客户端(OpenAI 兼容)──────────────────────
+# 默认给足输出预算,避免理解结果(字段多+中文)被截断成不完整 JSON;config 可覆盖。
+DEFAULT_MAX_TOKENS = 4096
+
+
 class _ChatClient:
-    def __init__(self, model: str, api_key: str, base_url: str):
+    def __init__(self, model: str, api_key: str, base_url: str,
+                 max_tokens: int | None = None):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self.max_tokens = max_tokens if max_tokens else DEFAULT_MAX_TOKENS
 
     def chat(self, messages: list[dict], *, temperature: float = 0.2,
              max_retries: int = 2) -> str:
@@ -82,7 +125,7 @@ class _ChatClient:
         headers = {"Authorization": f"Bearer {self.api_key}",
                    "Content-Type": "application/json"}
         payload = {"model": self.model, "messages": messages,
-                   "temperature": temperature}
+                   "temperature": temperature, "max_tokens": self.max_tokens}
         last_err: Exception | None = None
         for _ in range(max_retries + 1):
             try:
@@ -237,7 +280,8 @@ def _client_from(section: dict[str, Any]) -> _ChatClient:
             f"未知 provider '{section.get('provider')}' 且未提供 base_url。"
             f"任何 OpenAI 兼容服务都可用:填 provider + base_url + model + api_key 即可。"
         )
-    return _ChatClient(section["model"], section["api_key"], base_url)
+    return _ChatClient(section["model"], section["api_key"], base_url,
+                       max_tokens=section.get("max_tokens"))
 
 
 def build_vision_model(cfg: dict[str, Any]) -> VisionModel:

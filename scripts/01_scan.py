@@ -26,7 +26,15 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
 
+def is_junk_name(name: str) -> bool:
+    """macOS/系统垃圾文件:AppleDouble 资源叉(._foo.MOV)、隐藏点文件(.DS_Store 等)。
+    这些名字以 '.' 开头但扩展名可能伪装成 .mov/.jpg,必须按文件名而非扩展名排除。"""
+    return name.startswith(".")
+
+
 def detect_media_type(path: Path) -> str | None:
+    if is_junk_name(path.name):
+        return None
     suffix = path.suffix.lower()
     if suffix in VIDEO_EXTS:
         return "video"
@@ -197,8 +205,12 @@ def main() -> int:
     seen_ids = set()
     added = 0
     skipped = 0
+    junk = 0
     for path in sorted(input_dir.rglob("*")):
         if not path.is_file():
+            continue
+        if is_junk_name(path.name):     # ._资源叉 / .DS_Store 等系统垃圾,先计数再跳
+            junk += 1
             continue
         media_type = detect_media_type(path)
         if media_type is None:
@@ -214,7 +226,10 @@ def main() -> int:
         added += 1
 
     manifest.save()
-    print(f"扫描完成: 新增 {added} 条, 跳过重复 {skipped} 条")
+    msg = f"扫描完成: 新增 {added} 条, 跳过重复 {skipped} 条"
+    if junk:
+        msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
+    print(msg)
     return 0
 
 

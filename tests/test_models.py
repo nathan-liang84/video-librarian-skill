@@ -1,6 +1,8 @@
-"""_extract_json 健壮性测试(覆盖真机发现的 <think> 推理块问题)。"""
+"""_extract_json 健壮性测试(覆盖真机发现的 <think> 推理块 / 截断 / 纯文本问题)。"""
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -50,3 +52,28 @@ def test_first_json_when_second_json_trails():
 def test_first_array_when_json_trails():
     out = '[{"shot_no": 1}]\n补充说明\n{"debug": true}'
     assert _extract_json(out) == [{"shot_no": 1}]
+
+
+def test_repairs_trailing_commas():
+    # LLM 常见错误:对象/数组尾随逗号 → 轻修复后应能解析
+    assert _extract_json('{"a": [1, 2,], "b": 3,}') == {"a": [1, 2], "b": 3}
+
+
+def test_pure_text_raises_with_raw_snippet():
+    # 模型输出纯文本(没有任何 JSON)→ 抛带原始输出的 ValueError,便于定位
+    with pytest.raises(ValueError) as ei:
+        _extract_json("抱歉,我无法识别这段画面。")
+    msg = str(ei.value)
+    assert "原始输出" in msg and "抱歉" in msg
+
+
+def test_truncated_json_raises():
+    # 被截断的 JSON(max_tokens 太小的典型症状)→ 报错而非静默返回半个结果
+    with pytest.raises(ValueError):
+        _extract_json('{"scene": ["健身房"], "subjects": ["寸寸"')
+
+
+def test_empty_response_raises():
+    with pytest.raises(ValueError) as ei:
+        _extract_json("   ")
+    assert "空响应" in str(ei.value)
