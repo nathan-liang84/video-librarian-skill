@@ -34,12 +34,32 @@ def test_composite_subject_matches_requirement():
         _rec("d", ["空镜"]),
     ]
     req = {"subjects": ["寸寸"]}
-    got = {r.id for r in match._hard_filter(req, recs, strict=True)}
+    got = {r.id for r in match._hard_filter(req, recs, use_shot=True, use_subj=True)}
     assert got == {"a", "b"}, got
 
 
 def test_empty_subject_requirement_keeps_all():
     recs = [_rec("a", ["多人"]), _rec("b", ["空镜"])]
     req = {"subjects": []}
-    got = {r.id for r in match._hard_filter(req, recs, strict=True)}
+    got = {r.id for r in match._hard_filter(req, recs, use_shot=True, use_subj=True)}
     assert got == {"a", "b"}
+
+
+def test_fallback_relaxes_subjects_when_scene_matches():
+    """镜头人物解析过严(寸寸)但场景对(健身房),应放宽人物后命中 多人 素材。"""
+    recs = [_rec("gym", ["多人"], scene=["健身房"]),
+            _rec("mall", ["寸寸"], scene=["商场"])]
+    req = {"scene": ["健身房"], "subjects": ["寸寸"]}
+    # 精确档:寸寸 ∩ 多人 = 空 → 0 命中
+    assert match._hard_filter(req, recs, use_shot=True, use_subj=True) == []
+    # 渐进放宽:放掉人物后,靠 健身房 场景锚定命中 gym
+    cands, note = match._filter_with_fallback(req, recs)
+    assert {r.id for r in cands} == {"gym"}
+    assert "人物" in note
+
+
+def test_fallback_no_note_when_exact_match():
+    recs = [_rec("gym", ["多人"], scene=["健身房"])]
+    req = {"scene": ["健身房"], "subjects": []}
+    cands, note = match._filter_with_fallback(req, recs)
+    assert {r.id for r in cands} == {"gym"} and note == ""

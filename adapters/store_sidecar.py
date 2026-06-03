@@ -86,12 +86,17 @@ class SidecarAdapter(StoreAdapter):
             index.add(str(sidecar_path))
         self._save_index(list(index))
 
-    def rebuild_summary(self, scan_roots: list[Path] | None = None) -> None:
-        records = []
+    def load_records(self, scan_roots: list[Path] | None = None) -> list[Record]:
+        """读出旁车里的全部记录(持久库)。供脚本匹配独立读取,不依赖 manifest 工作状态。"""
+        records: list[Record] = []
         for path in self._discover_sidecars(scan_roots):
             record = self._read_record(path)
             if record is not None:
                 records.append(record)
+        return records
+
+    def rebuild_summary(self, scan_roots: list[Path] | None = None) -> None:
+        records = self.load_records(scan_roots)
 
         wb = Workbook()
         ws = wb.active
