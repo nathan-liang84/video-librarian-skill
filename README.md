@@ -24,7 +24,7 @@
 - 数据层:可插拔双模式 —— ① 飞书多维表格;② JSON 旁车文件 + Excel/CSV(适合只有云盘的用户)
 - 模型:**MiniMax M3** 看画面 + **MiniMax M2.7** 处理文本 + 本地 **faster-whisper** 转写
 
-未来扩展:自动人脸聚类、通用大众版照片整理 —— 完整规划见 [PRD-consumer.md](PRD-consumer.md)。
+未来扩展:自动人脸聚类、通用大众版照片整理 —— 作为**独立 skill** 开发,见 [photo-librarian-skill](https://github.com/nathan-liang84/photo-librarian-skill)。
 
 ## 目录结构
 

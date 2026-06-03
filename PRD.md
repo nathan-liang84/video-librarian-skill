@@ -325,7 +325,7 @@ video-librarian-skill/
 - 面向普通人整理生活照片/视频,按时间/人物/地点/场景/事件筛选;
 - 复用同一管线与统一 schema,扩展生活化 vocab + 命名模板;
 - 人脸归类是该版核心能力之一。
-- **完整规划与 PRD 见 [PRD-consumer.md](PRD-consumer.md)**(含人脸归类、地理、事件聚类、近似去重、本地相册、自然语言检索)。
+- **作为独立 skill 开发**(不与本仓库混合),完整规划见 [photo-librarian-skill](https://github.com/nathan-liang84/photo-librarian-skill)(人脸归类/地理/事件/相册/自然语言检索)。
 
 ---
 
