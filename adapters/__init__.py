@@ -2,3 +2,7 @@
 
 通过 build_adapter(cfg) 工厂按 store.mode 返回 feishu / sidecar / 组合适配器。
 """
+
+from .base import build_adapter
+
+__all__ = ["build_adapter"]
