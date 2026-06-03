@@ -86,12 +86,34 @@ class SidecarAdapter(StoreAdapter):
             index.add(str(sidecar_path))
         self._save_index(list(index))
 
-    def rebuild_summary(self, scan_roots: list[Path] | None = None) -> None:
-        records = []
+    @staticmethod
+    def _dedup_rank(record: Record, sidecar_path: Path) -> tuple:
+        """同 id 多份旁车(改名后旧旁车残留)时的择优依据,越大越优先:
+        ① 媒体文件仍存在 ② 旁车文件名与记录当前名同 stem(即随文件走的当前旁车)
+        ③ 处理时间较新。"""
+        media = Path(record.path) if record.path else None
+        path_exists = 1 if (media and media.exists()) else 0
+        expected_stem = Path(record.new_name or (media.name if media else "")).stem
+        stem_match = 1 if (expected_stem and sidecar_path.stem == expected_stem) else 0
+        return (path_exists, stem_match, record.processed_at or "")
+
+    def load_records(self, scan_roots: list[Path] | None = None) -> list[Record]:
+        """读出旁车里的全部记录(持久库)。供脚本匹配独立读取,不依赖 manifest 工作状态。
+        按 record.id 去重:残留的旧旁车不会让同一素材重复进候选/总表。"""
+        best: dict[str, tuple] = {}   # id -> (rank, record)
         for path in self._discover_sidecars(scan_roots):
             record = self._read_record(path)
-            if record is not None:
-                records.append(record)
+            if record is None:
+                continue
+            key = record.id or str(path)        # 缺 id 时退化为按路径各算一条
+            rank = self._dedup_rank(record, path)
+            current = best.get(key)
+            if current is None or rank > current[0]:
+                best[key] = (rank, record)
+        return [rec for _, rec in best.values()]
+
+    def rebuild_summary(self, scan_roots: list[Path] | None = None) -> None:
+        records = self.load_records(scan_roots)
 
         wb = Workbook()
         ws = wb.active
