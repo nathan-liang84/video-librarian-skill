@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from adapters import build_adapter  # noqa: E402
+from adapters.store_sidecar import SidecarAdapter  # noqa: E402
+from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
 
 
@@ -21,12 +24,39 @@ def main() -> int:
     ap.add_argument("--manifest", default="state/manifest.json")
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--rebuild-only", action="store_true")
+    ap.add_argument("--input", action="append",
+                    help="素材根目录(可重复传入,供 sidecar rebuild 扫描旁车)")
     args = ap.parse_args()
 
+    cfg = load_config(Path(args.config))
+    adapter = build_adapter(cfg)
     manifest = Manifest(Path(args.manifest)).load()
-    # TODO(GPT-5.4): load_config → build_adapter → upsert_records / rebuild_summary
+    if args.rebuild_only:
+        if isinstance(adapter, SidecarAdapter):
+            scan_roots = [Path(path).resolve() for path in (args.input or [])]
+            adapter.rebuild_summary(scan_roots=scan_roots or None)
+        else:
+            adapter.rebuild_summary()
+        print("已重建汇总表。")
+        return 0
+
+    todo = [record for record in manifest.iter_records() if record.status == "named"]
+    if not todo:
+        print("没有待入库的记录。")
+        return 0
+
+    for record in todo:
+        record.status = "stored"
+        manifest.upsert(record)
+    adapter.upsert_records(todo)
+    if isinstance(adapter, SidecarAdapter):
+        scan_roots = [Path(path).resolve() for path in (args.input or [])]
+        adapter.rebuild_summary(scan_roots=scan_roots or None)
+    else:
+        adapter.rebuild_summary()
     manifest.save()
-    raise NotImplementedError
+    print(f"已入库 {len(todo)} 条记录。")
+    return 0
 
 
 if __name__ == "__main__":
