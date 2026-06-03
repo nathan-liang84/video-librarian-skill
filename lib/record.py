@@ -57,6 +57,7 @@ class Record:
     usable_clips: list[dict] = field(default_factory=list)
     suggested_use: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    keyword: Optional[str] = None     # 命名用关键词(03 产出)
 
     confidence: Optional[float] = None
     processed_at: Optional[str] = None

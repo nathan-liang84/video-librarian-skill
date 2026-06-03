@@ -18,6 +18,13 @@ from .record import Record
 
 DEFAULT_PATH = Path("state/manifest.json")
 
+# 线性进度顺序(needs_review / failed 不在其中,视为"未完成"以便复核/重试)
+PROGRESS = ["pending", "extracted", "understood", "named", "stored"]
+
+
+def _rank(status: str) -> int:
+    return PROGRESS.index(status) if status in PROGRESS else -1
+
 
 class Manifest:
     def __init__(self, path: Path = DEFAULT_PATH):
@@ -46,13 +53,19 @@ class Manifest:
 
     def has_done(self, record_id: str, target_status: str) -> bool:
         """该记录是否已达到(或超过)目标状态——用于跳过已处理项。"""
-        # TODO(GPT-5.4): 用 record.STATUSES 的顺序比较实现"已达到或超过"
-        raise NotImplementedError
+        rec = self._records.get(record_id)
+        if rec is None:
+            return False
+        return _rank(rec.status) >= _rank(target_status) >= 0
 
     def iter_records(self) -> Iterator[Record]:
         return iter(self._records.values())
 
-    def iter_pending(self, target_status: str) -> Iterator[Record]:
-        """产出尚未达到 target_status 的记录。"""
-        # TODO(GPT-5.4): 基于 has_done 过滤
-        raise NotImplementedError
+    def iter_pending(self, target_status: str, *, include_failed: bool = False
+                     ) -> Iterator[Record]:
+        """产出尚未达到 target_status 的记录(默认跳过 failed,可显式纳入重试)。"""
+        for rec in self._records.values():
+            if rec.status == "failed" and not include_failed:
+                continue
+            if not self.has_done(rec.id, target_status):
+                yield rec
