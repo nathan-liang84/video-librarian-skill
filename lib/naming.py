@@ -32,6 +32,9 @@ def sanitize_segment(s: str) -> str:
     return s
 
 
+SUBJECT_MAX_LEN = 8   # 主体段限长(中文名词通常很短;防止"蜜雪冰城北京主题柠檬饮品"撑爆文件名)
+
+
 def _people_segment(subjects: list[str]) -> str:
     """由 subjects 生成命名用的人物段;空镜/空 → 省略。"""
     if not subjects:
@@ -43,6 +46,17 @@ def _people_segment(subjects: list[str]) -> str:
     if len(cleaned) == 1:
         return cleaned[0]
     return "和".join(cleaned[:2])
+
+
+def _subject_segment(record: dict[str, Any]) -> str:
+    """命名主体段(每条素材都该有的主体锚点)。模型判断主次:
+    ① main_subject(模型选定的画面焦点:人名/物品/建筑/风景词)优先,限长;
+    ② 模型没给 → 退回人物名册段(subjects);
+    ③ 仍为空 → 返回空,由上层让场景兜底。"""
+    main = (record.get("main_subject") or "").strip()
+    if main:
+        return main[:SUBJECT_MAX_LEN]
+    return _people_segment(record.get("subjects") or [])
 
 
 def _date_segment(shot_at: str | None, fmt: str) -> str:
@@ -73,9 +87,13 @@ def render_basename(
     pad = int(naming_cfg.get("seq_padding", 2))
     date_fmt = naming_cfg.get("date_format", "%Y%m%d")
 
+    subject = _subject_segment(record)
     values = {
         "date": _date_segment(record.get("shot_at"), date_fmt),
-        "people": _people_segment(record.get("subjects") or []),
+        # subject = 通用主体段(人/物/建筑/风景);people 作为向后兼容别名,取同值,
+        # 这样旧模板 {date}_{people}_{scene}_{seq} 也自动升级为"有主体"。
+        "subject": subject,
+        "people": subject,
         "scene": (record.get("scene") or [""])[0],   # 取主场景
         "shot_type": record.get("shot_type") or "",
         "keyword": record.get("keyword") or "",

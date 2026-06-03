@@ -74,9 +74,11 @@ people:
 # ── 命名规则 ─────────────────────────────────────────────
 naming:
   language: zh
-  # 可用占位符:{date} {people} {scene} {shot_type} {keyword} {seq}
-  template_photo: "{date}_{people}_{scene}_{seq}"
-  template_video: "{date}_{people}_{scene}_{shot_type}_{seq}"
+  # 可用占位符:{date} {subject} {scene} {shot_type} {keyword} {seq}
+  #   {subject} = 画面主体(每条都有):人物用名册名,否则物品/建筑/风景词(柠檬茶/教堂/海岸线)。
+  #               由模型判断主次。{people} 是它的向后兼容别名(取同值)。
+  template_photo: "{date}_{subject}_{scene}_{seq}"
+  template_video: "{date}_{subject}_{scene}_{seq}"
   date_format: "%Y%m%d"
   seq_padding: 2
   drop_empty_segments: true   # 字段缺失时省略对应段,保持短

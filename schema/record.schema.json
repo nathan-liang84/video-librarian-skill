@@ -26,6 +26,8 @@
     "description": { "type": ["string", "null"] },
     "scene": { "type": "array", "items": { "type": "string" }, "description": "受控:vocab.scene" },
     "subjects": { "type": "array", "items": { "type": "string" }, "description": "人物:来自 config 名册(如 寸寸/寸寸和男朋友/寸寸和宠物狗)或 多人/空镜" },
+    "main_subject": { "type": ["string", "null"], "description": "画面主体(命名锚点):简短名词。人物→名册人名,否则→物品/建筑/风景词(如 柠檬茶/教堂/海岸线)。由模型判断主次" },
+    "subject_kind": { "type": ["string", "null"], "enum": ["人物", "物品", "建筑", "风景", "动物", "食物", "其他", null], "description": "受控:vocab.subject_kind,main_subject 属于哪类" },
     "actions": { "type": "array", "items": { "type": "string" } },
 
     "shot_type": { "type": ["string", "null"], "description": "受控:vocab.shot_type" },

@@ -34,6 +34,13 @@
    `subject_basis` 取 `face`(看到脸)/`appearance`(发型身形穿搭等外观)/
    `inferred`(主角先验推断)/`none`(无人或完全无法判断)。
 5. 数值字段:`quality_score` 为 1–5 整数(综合清晰度/曝光/抖动);`confidence` 为 0–1,表示你对本次判断的整体把握。
+6. **画面主体 `main_subject` + 主体类型 `subject_kind`(每条必填,命名要用)**:
+   先判断这条素材**主要在拍什么**(谁是画面焦点),再给一个**简短名词**当主体:
+   - 焦点是人 → `subject_kind="人物"`,`main_subject` 用名册人名(寸寸);名册外的人用「多人」。
+   - 焦点是物/建筑/风景/动物/食物 → 对应 `subject_kind`,`main_subject` 给该物的简短名词
+     (如「柠檬茶」「教堂」「海岸线」「小狗」),**不超过 8 个字**,不要整句描述。
+   - **由你判断主次**:即使画面里有人,若镜头主要在展示某物品,也可把物品当主体。
+   - `subject_kind` 只能取:人物/物品/建筑/风景/动物/食物/其他。
 
 ## 输出 JSON 结构
 
@@ -43,6 +50,8 @@
   "subjects": ["..."],
   "subject_confidence": 0.0,
   "subject_basis": "face",
+  "main_subject": "柠檬茶",
+  "subject_kind": "物品",
   "actions": ["简短动作/事件，1-4 个"],
   "shot_type": "...",
   "camera_move": ["..."],

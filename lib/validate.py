@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-SINGLE_FIELDS = ["shot_type", "lighting"]
+SINGLE_FIELDS = ["shot_type", "lighting", "subject_kind"]
 MULTI_FIELDS = ["scene", "camera_move", "mood", "suggested_use"]
 
 
