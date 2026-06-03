@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VideoLibrarian Media Record",
+  "description": "单个视频/照片素材的标准化记录。各管线阶段逐步填充字段。这是跨阶段、跨模型协作的共享契约——改字段须同步 PRD §5 与 config/vocab.yaml。",
+  "type": "object",
+  "required": ["id", "media_type", "original_name", "path", "status", "schema_version"],
+  "properties": {
+    "id": { "type": "string", "description": "文件内容指纹(SHA1 前16位),去重主键" },
+    "media_type": { "type": "string", "enum": ["video", "photo"] },
+    "original_name": { "type": "string" },
+    "new_name": { "type": ["string", "null"], "description": "规范化新文件名(简短)" },
+    "path": { "type": "string", "description": "当前路径/云盘相对路径" },
+    "thumbnail": { "type": ["string", "null"], "description": "缩略图路径;视频另含雪碧图" },
+    "sprite": { "type": ["string", "null"] },
+
+    "duration_sec": { "type": ["number", "null"] },
+    "resolution": { "type": ["string", "null"] },
+    "fps": { "type": ["number", "null"] },
+    "codec": { "type": ["string", "null"] },
+    "filesize_mb": { "type": ["number", "null"] },
+    "shot_at": { "type": ["string", "null"], "format": "date-time" },
+    "gps": { "type": ["string", "null"] },
+    "device": { "type": ["string", "null"] },
+
+    "summary": { "type": ["string", "null"], "description": "一句话总结" },
+    "description": { "type": ["string", "null"] },
+    "scene": { "type": "array", "items": { "type": "string" }, "description": "受控:vocab.scene" },
+    "subjects": { "type": "array", "items": { "type": "string" }, "description": "人物:来自 config 名册(如 寸寸/寸寸和男朋友/寸寸和宠物狗)或 多人/空镜" },
+    "actions": { "type": "array", "items": { "type": "string" } },
+
+    "shot_type": { "type": ["string", "null"], "description": "受控:vocab.shot_type" },
+    "camera_move": { "type": "array", "items": { "type": "string" }, "description": "受控:vocab.camera_move(视频)" },
+    "mood": { "type": "array", "items": { "type": "string" }, "description": "受控:vocab.mood" },
+    "lighting": { "type": ["string", "null"], "description": "受控:vocab.lighting" },
+    "quality_score": { "type": ["number", "null"], "minimum": 1, "maximum": 5 },
+    "has_speech": { "type": ["boolean", "null"] },
+    "transcript": { "type": ["string", "null"] },
+    "usable_clips": {
+      "type": "array",
+      "description": "可用片段时间码(视频)",
+      "items": {
+        "type": "object",
+        "required": ["start", "end"],
+        "properties": {
+          "start": { "type": "number", "description": "起始秒" },
+          "end": { "type": "number", "description": "结束秒" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "suggested_use": { "type": "array", "items": { "type": "string" }, "description": "受控:vocab.suggested_use" },
+    "tags": { "type": "array", "items": { "type": "string" }, "description": "受控词表外的自由补充标签" },
+
+    "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "status": { "type": "string", "enum": ["pending", "extracted", "understood", "named", "stored", "needs_review", "failed"] },
+    "schema_version": { "type": "string" },
+    "processed_at": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

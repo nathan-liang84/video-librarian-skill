@@ -1,0 +1,80 @@
+# VideoLibrarian 配置示例
+# 复制为 config/config.yaml 后填写真实值。config.yaml 已在 .gitignore,不会提交。
+
+# ── 数据层 ───────────────────────────────────────────────
+store:
+  mode: sidecar            # feishu | sidecar | both
+  sidecar:
+    output_dir: ./output   # 旁车 JSON 与 _素材总表.xlsx 输出位置
+    summary_file: _素材总表.xlsx
+    thumb_dirname: .thumbs # 缩略图存放子目录(与素材同级)
+  feishu:
+    app_id: ""             # 飞书自建应用 App ID
+    app_secret: ""         # App Secret(机密)
+    app_token: ""          # 多维表格 app_token(Base)
+    table_id: ""           # 素材库表 table_id
+    # 所需权限见 docs/TASK_BREAKDOWN.md 飞书章节
+
+# ── 模型 ─────────────────────────────────────────────────
+models:
+  vision:                  # 看画面:必须支持图像输入
+    provider: minimax
+    model: MiniMax-M3
+    api_key: ""
+    base_url: "https://api.minimaxi.com/v1"   # 以官方文档为准
+    max_frames_per_video: 36
+  text:                    # 纯文本:总结/打标签/脚本匹配(便宜)
+    provider: minimax
+    model: MiniMax-M2.7
+    api_key: ""
+    base_url: "https://api.minimaxi.com/v1"
+  asr:
+    provider: faster-whisper   # 本地优先;或 cloud
+    model: small               # tiny|base|small|medium|large-v3
+    device: auto               # auto|cpu|cuda
+    language: zh
+
+# 成本两档:quick=快扫建索引(便宜), refine=精修(标记后再跑)
+cost_tier: quick           # quick | refine
+
+# ── 抽帧策略 ─────────────────────────────────────────────
+extract:
+  scene_threshold: 0.4     # ffmpeg 场景切换检测阈值
+  sample_interval_sec: 5   # 均匀采样兜底:每 N 秒 1 帧
+  max_frames_per_minute: 6
+  min_frames_short_clip: 3 # <10s 短视频至少抽几帧
+  thumbnail_width: 320
+  make_sprite: true        # 视频生成 3x3 概览雪碧图
+
+# ── 人物名册(v1:主角固定,参考图引导识别)─────────────
+people:
+  main:
+    name: 寸寸
+    refs:                  # 1-2 张参考图(放 config/refs/,已 gitignore)
+      - config/refs/cuncun_1.jpg
+      - config/refs/cuncun_2.jpg
+  companions:              # 固定关系人/宠物,可选附参考图
+    - name: 男朋友
+      refs: [config/refs/bf_1.jpg]
+    - name: 闺蜜
+      refs: []
+    - name: 宠物狗
+      refs: [config/refs/dog_1.jpg]
+  # 名册外的人统一记为「多人」;无人记「空镜」
+
+# ── 命名规则 ─────────────────────────────────────────────
+naming:
+  language: zh
+  # 可用占位符:{date} {people} {scene} {shot_type} {keyword} {seq}
+  template_photo: "{date}_{people}_{scene}_{seq}"
+  template_video: "{date}_{people}_{scene}_{shot_type}_{seq}"
+  date_format: "%Y%m%d"
+  seq_padding: 2
+  drop_empty_segments: true   # 字段缺失时省略对应段,保持短
+  max_length: 80
+
+# ── 运行 ─────────────────────────────────────────────────
+runtime:
+  concurrency: 4
+  needs_review_confidence: 0.6
+  needs_review_quality: 3

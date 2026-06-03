@@ -1,0 +1,60 @@
+# VideoLibrarian — 视频/照片素材智能整理 Skill
+
+一套**跨 Agent 平台通用的 Skill**(OpenClaw / Codex / Claude Code 均可调用):自动"读懂"大量视频与照片素材 → 总结 + 打标签 + 规范命名 → 汇总成可检索的素材总表 → 按剪辑脚本快速匹配可用素材。
+
+> 设计文档见 [PRD.md](PRD.md)。任务拆解与协作分工见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
+
+## 它解决什么
+
+剪辑师/创作者手里堆了几百上千个 `IMG_xxxx.mov`,没人记得里面拍了什么、能不能用、哪一段能用。本 skill 让 Agent 批量看懂素材并建立索引,剪辑时按脚本一键召回候选镜头 + 推荐时间码。
+
+## 处理管线
+
+```
+0 环境探测 → 1 盘点去重 → 2 抽帧/抽音轨/ASR/缩略图 → 3 多模态理解(+人物名册识别)
+          → 4 打标签 + 简短命名(可回滚) → 5 入库(飞书多维表格 / JSON旁车+Excel) → 6 脚本匹配
+```
+
+## v1 范围
+
+- 媒体:**视频 + 照片**
+- 内容理解:画面(M3 看关键帧)+ 语音(本地 ASR)双通道融合
+- 人物:**预设人物名册 + 参考图引导识别**(主角固定,如"寸寸";不做自动人脸聚类——留给大众版)
+- 命名:`时间_人物_场景`,简短、安全、可回滚
+- 数据层:可插拔双模式 —— ① 飞书多维表格;② JSON 旁车文件 + Excel/CSV(适合只有云盘的用户)
+- 模型:**MiniMax M3** 看画面 + **MiniMax M2.7** 处理文本 + 本地 **faster-whisper** 转写
+
+未来扩展:自动人脸聚类、通用大众版照片整理(见 PRD §11)。
+
+## 目录结构
+
+```
+video-librarian-skill/
+├── SKILL.md              # Agent 读这个:技能说明 + 调用流程
+├── PRD.md                # 产品需求文档
+├── config/               # 配置(数据层、命名、抽帧、模型、人物名册)+ 受控词表
+├── schema/               # 素材记录 JSON Schema(各阶段共享契约)
+├── lib/                  # 共享库:记录、状态清单、模型客户端抽象
+├── adapters/             # 数据层适配器:飞书 / 旁车
+├── scripts/              # 管线各阶段 00–06
+├── docs/                 # 任务拆解 / 协作分工
+└── state/               # 运行状态(manifest / rename_log,默认 gitignore)
+```
+
+## 快速开始(开发中)
+
+```bash
+pip install -r requirements.txt
+cp config/config.example.yaml config/config.yaml   # 填模型 key、飞书凭证、人物名册
+python scripts/00_detect_env.py                     # 检查 ffmpeg / ASR / 数据层
+python scripts/01_scan.py  --input /path/to/media   # 盘点
+# ... 02 → 06 详见 SKILL.md
+```
+
+## 协作方式
+
+本仓库由多模型协作开发:架构与高风险逻辑由 Opus 4.8 负责,常规开发由 GPT-5.4(Codex)负责,代码检查见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
+
+## License
+
+MIT

@@ -1,0 +1,22 @@
+# 核心
+PyYAML>=6.0            # 读配置/词表
+Pillow>=10.0           # 缩略图、图片处理
+piexif>=1.1            # 照片 EXIF 读取(或用 exifread)
+openpyxl>=3.1          # 写 Excel 总表
+
+# 媒体处理(ffmpeg/ffprobe 为系统级依赖,需另行安装)
+# 抽帧/抽音轨通过 subprocess 调 ffmpeg,无需 Python 绑定;如需可加 ffmpeg-python
+
+# 语音转写(本地优先)
+faster-whisper>=1.0    # 本地 ASR;无 GPU 也可 CPU 跑小模型
+
+# 模型客户端
+requests>=2.31         # 调 MiniMax / 飞书 REST API
+# openai>=1.0          # 若用 OpenAI 兼容端点访问 MiniMax,可启用
+
+# 检索/匹配(语义排序,可选其一)
+# numpy>=1.24
+# scikit-learn>=1.3    # 简单向量相似度;或用模型自带 embedding 接口
+
+# 开发
+pytest>=8.0

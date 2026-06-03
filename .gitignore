@@ -1,0 +1,31 @@
+# 本地配置(含密钥,切勿提交)
+config/config.yaml
+config/config.*.local.yaml
+.env
+
+# 运行状态
+state/*
+!state/.gitkeep
+
+# 人物参考图(用户私有素材)
+config/faces/
+config/refs/
+
+# 缩略图与中间产物
+**/.thumbs/
+*.sprite.jpg
+tmp/
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# OS / 编辑器
+.DS_Store
+.idea/
+.vscode/
