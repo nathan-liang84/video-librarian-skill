@@ -79,12 +79,22 @@ def _slim(r) -> dict:
             "shot_type": r.shot_type, "usable_clips": r.usable_clips}
 
 
+def _find_sidecar(adapter) -> SidecarAdapter | None:
+    """取出 SidecarAdapter:both 模式下它藏在 CompositeAdapter.adapters 里。"""
+    if isinstance(adapter, SidecarAdapter):
+        return adapter
+    for sub in getattr(adapter, "adapters", []):
+        if isinstance(sub, SidecarAdapter):
+            return sub
+    return None
+
+
 def _load_library(cfg: dict, manifest_path: Path, scan_roots: list[Path]) -> list:
     """优先从持久库(旁车)读;读不到再退回 manifest 工作状态。"""
     try:
-        adapter = build_adapter(cfg)
-        if isinstance(adapter, SidecarAdapter):
-            recs = adapter.load_records(scan_roots or None)
+        sidecar = _find_sidecar(build_adapter(cfg))   # both 模式也能拿到旁车
+        if sidecar is not None:
+            recs = sidecar.load_records(scan_roots or None)
             if recs:
                 return recs
     except Exception as e:  # 配置/读取异常不致命:退回 manifest

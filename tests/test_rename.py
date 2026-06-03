@@ -72,6 +72,51 @@ def test_rollback_cleans_orphan_hardlink(tmp_path=None):
         shutil.rmtree(T)
 
 
+def test_move_file_moved_on_success():
+    T = Path(tempfile.mkdtemp())
+    try:
+        src, dst = T / "a.mp4", T / "b.mp4"
+        src.write_text("x")
+        assert m04._move_file(src, dst) == "moved"
+        assert dst.exists() and not src.exists()
+    finally:
+        shutil.rmtree(T)
+
+
+def test_move_file_exists_skips():
+    T = Path(tempfile.mkdtemp())
+    try:
+        src, dst = T / "a.mp4", T / "b.mp4"
+        src.write_text("x"); dst.write_text("occupied")
+        assert m04._move_file(src, dst) == "exists"
+        assert src.exists() and dst.read_text() == "occupied"  # 都没被动
+    finally:
+        shutil.rmtree(T)
+
+
+def test_move_file_orphan_when_unlink_fails(monkeypatch):
+    """关键回归:os.link 成功但 os.unlink 失败 → 不能误判为 exists 而吞掉日志。
+    必须返回 orphan,让调用方保留 applied=False 的 journal 供 --rollback 清理。"""
+    T = Path(tempfile.mkdtemp())
+    try:
+        src, dst = T / "a.mp4", T / "b.mp4"
+        src.write_text("x")
+
+        real_unlink = m04.os.unlink
+        def boom(path, *a, **k):       # 仅对目标源文件失败;其余(含 rmtree)照常
+            if str(path) == str(src):
+                raise OSError("unlink blocked")
+            return real_unlink(path, *a, **k)
+        monkeypatch.setattr(m04.os, "unlink", boom)
+
+        assert m04._move_file(src, dst) == "orphan"
+        # link 已成功:old/new 并存且同 inode(可被 do_rollback 的 samefile 清理)
+        assert src.exists() and dst.exists()
+        assert os.path.samefile(src, dst)
+    finally:
+        shutil.rmtree(T)
+
+
 def test_full_rollback_clears_log():
     T = Path(tempfile.mkdtemp())
     try:

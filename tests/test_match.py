@@ -63,3 +63,17 @@ def test_fallback_no_note_when_exact_match():
     req = {"scene": ["健身房"], "subjects": []}
     cands, note = match._filter_with_fallback(req, recs)
     assert {r.id for r in cands} == {"gym"} and note == ""
+
+
+def test_find_sidecar_unwraps_composite():
+    """store.mode=both 时 SidecarAdapter 藏在 CompositeAdapter.adapters 里,
+    必须能取出,否则脚本匹配读不到持久库(review P1)。"""
+    from adapters.base import CompositeAdapter
+    from adapters.store_sidecar import SidecarAdapter
+
+    sidecar = SidecarAdapter.__new__(SidecarAdapter)   # 免配置造一个实例
+    other = object()
+    composite = CompositeAdapter([other, sidecar])
+    assert match._find_sidecar(composite) is sidecar
+    assert match._find_sidecar(sidecar) is sidecar
+    assert match._find_sidecar(object()) is None

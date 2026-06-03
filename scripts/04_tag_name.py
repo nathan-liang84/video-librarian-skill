@@ -49,6 +49,29 @@ def _save_log(entries: list[dict]) -> None:
                           encoding="utf-8")
 
 
+def _move_file(src: Path, dst: Path) -> str:
+    """把 src 安全移动到 dst(no-clobber)。link 与 unlink 分两段,绝不共用 except,
+    免得"已链接但删源失败"被误当成"目标已存在"。返回:
+      'moved'  → 成功(old 消失、new 出现)
+      'exists' → 目标已存在,未改动,应跳过
+      'orphan' → 已建硬链接但删源失败,old/new 并存;journal 须保留待 --rollback 清理
+    """
+    try:
+        os.link(src, dst)                 # 目标已存在 → FileExistsError,绝不覆盖
+    except FileExistsError:
+        return "exists"
+    except OSError:                       # 跨文件系统无法硬链(同目录通常不会发生)
+        if dst.exists():
+            return "exists"
+        src.rename(dst)                   # 原子移动:成功即 old 消失、new 出现
+        return "moved"
+    try:
+        os.unlink(src)
+    except OSError:
+        return "orphan"
+    return "moved"
+
+
 def do_rollback() -> int:
     log = _load_log()
     if not log:
@@ -176,21 +199,20 @@ def main() -> int:
                      "ts": _now(), "applied": False}
             log.append(entry)
             _save_log(log)
-            # ② 原子 no-clobber:os.link 在目标已存在时报 FileExistsError,绝不覆盖
-            try:
-                os.link(src, dst)
-                os.unlink(src)
-            except FileExistsError:
+            # ② no-clobber 移动;link/unlink 分段,避免"已链接但删源失败"被误判为
+            #    "目标已存在"而 pop 掉日志、留下孤立硬链接(见 _move_file)。
+            status = _move_file(src, dst)
+            if status == "exists":
                 log.pop(); _save_log(log)
                 print(f"  [跳过] 目标已存在:{dst.name}")
                 continue
-            except OSError:  # 跨文件系统无法硬链(同目录通常不会发生)→ 谨慎回退
-                if dst.exists():
-                    log.pop(); _save_log(log)
-                    print(f"  [跳过] 目标已存在:{dst.name}")
-                    continue
-                src.rename(dst)
-            # ③ 标记完成并落盘
+            if status == "orphan":
+                # 已建硬链接但删源失败 → old/new 并存。保留 applied=False 的 journal,
+                # --rollback 会用 samefile 检测并清理;此处不标完成、不更新记录。
+                print(f"  [警告] 已链接但删源失败:{src.name};"
+                      f"保留日志,稍后可 --rollback 清理孤立链接。")
+                continue
+            # ③ status == "moved":标记完成并落盘
             entry["applied"] = True
             _save_log(log)
             r.new_name = dst.name
