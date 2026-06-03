@@ -33,6 +33,8 @@
     "mood": { "type": "array", "items": { "type": "string" }, "description": "受控:vocab.mood" },
     "lighting": { "type": ["string", "null"], "description": "受控:vocab.lighting" },
     "quality_score": { "type": ["number", "null"], "minimum": 1, "maximum": 5 },
+    "subject_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "对 subjects(尤其主角)身份判断的把握;没露脸/靠外观推断时偏低" },
+    "subject_basis": { "type": ["string", "null"], "enum": ["face", "appearance", "inferred", "none", null], "description": "身份判断依据:face=看到脸/appearance=发型身形穿搭等外观/inferred=主角先验推断/none=无人或无法判断" },
     "has_speech": { "type": ["boolean", "null"] },
     "transcript": { "type": ["string", "null"] },
     "usable_clips": {

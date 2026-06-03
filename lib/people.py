@@ -38,8 +38,13 @@ def _merge_refs(explicit: list[str] | None, name: str, refs_dir: Path) -> list[s
 
 
 def resolve_people(cfg: dict[str, Any], refs_dir: Path = REFS_DIR) -> dict[str, Any]:
-    """返回归一化的名册(结构同 config.people,但 refs 已合并自动发现的图)。"""
+    """返回归一化的名册(结构同 config.people,但 refs 已合并自动发现的图)。
+
+    保留 people 段里的其它键(如 bias_to_main / main_recognition_hint),
+    供下游"主角先验"与外观提示使用。
+    """
     people = cfg.get("people", {}) or {}
+    resolved = dict(people)            # 透传 bias_to_main / main_recognition_hint 等额外键
     main = dict(people.get("main") or {})
     if main.get("name"):
         main["refs"] = _merge_refs(main.get("refs"), main["name"], refs_dir)
@@ -50,7 +55,9 @@ def resolve_people(cfg: dict[str, Any], refs_dir: Path = REFS_DIR) -> dict[str, 
         if c.get("name"):
             c["refs"] = _merge_refs(c.get("refs"), c["name"], refs_dir)
         companions.append(c)
-    return {"main": main, "companions": companions}
+    resolved["main"] = main
+    resolved["companions"] = companions
+    return resolved
 
 
 def all_ref_images(resolved_people: dict[str, Any]) -> list[Path]:

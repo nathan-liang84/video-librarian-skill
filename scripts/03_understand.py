@@ -23,7 +23,40 @@ from lib.models import build_vision_model, build_text_model  # noqa: E402
 from lib.people import resolve_people, all_ref_images  # noqa: E402
 
 VISION_FIELDS = ["scene", "subjects", "actions", "shot_type", "camera_move",
-                 "mood", "lighting", "quality_score"]
+                 "mood", "lighting", "quality_score",
+                 "subject_confidence", "subject_basis"]
+
+
+def _subject_atoms(subjects) -> set:
+    """['寸寸和多人'] → {'寸寸','多人'},便于判断主角是否在内。"""
+    out: set = set()
+    for s in subjects or []:
+        for a in str(s).split("和"):
+            if a:
+                out.add(a)
+    return out
+
+
+def is_tentative_main(record, people_cfg: dict, conf_thresh: float) -> bool:
+    """主角先验:开启 bias_to_main 且主角被推断进 subjects 但身份把握低 → 待人工确认。
+    needs_review 不参与 04 命名与 06 匹配,因此未确认的身份不会进文件名/匹配结果。
+
+    身份依据(subject_basis)是关键:
+      - inferred/appearance(没露脸靠先验或外观推断)→ 即使模型漏给 confidence,
+        也保守送审,绝不让"没确认的没露脸主角"溜进 understood。
+      - face/未知依据 → 仅当 confidence 明确偏低才送审;缺 confidence 不臆断。"""
+    main_name = (people_cfg.get("main") or {}).get("name")
+    if not (people_cfg.get("bias_to_main") and main_name):
+        return False
+    if main_name not in _subject_atoms(getattr(record, "subjects", None)):
+        return False
+    conf = record.subject_confidence
+    basis = (record.subject_basis or "").lower()
+    if basis in ("inferred", "appearance"):     # 非面部推断:缺可信度也要送审
+        return conf is None or conf < conf_thresh
+    if conf is None:                            # 面部/未知依据且无可信度 → 不臆断
+        return False
+    return conf < conf_thresh
 
 
 def _frames_for(record, workdir: Path) -> list[Path]:
@@ -113,9 +146,14 @@ def main() -> int:
 
         low_conf = (r.confidence or 0) < conf_thresh
         low_q = (r.quality_score or 5) < q_thresh
-        r.status = "needs_review" if (low_conf or low_q) else "understood"
+        tentative_main = is_tentative_main(r, people_cfg, conf_thresh)
+        r.status = "needs_review" if (low_conf or low_q or tentative_main) else "understood"
         manifest.upsert(r)
-        flag = "  ⚠needs_review" if r.status == "needs_review" else ""
+        if r.status == "needs_review":
+            why = "疑似主角待确认" if tentative_main and not (low_conf or low_q) else "低置信/低画质"
+            flag = f"  ⚠needs_review({why})"
+        else:
+            flag = ""
         print(f"  [{r.status}] {r.original_name}: {r.summary}{flag}")
 
     manifest.save()

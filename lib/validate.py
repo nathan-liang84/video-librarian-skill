@@ -56,4 +56,12 @@ def validate_record(
     if qs is not None and not (1 <= qs <= 5):
         issues.append(f"quality_score={qs} 超出 1-5")
 
+    sc = record.get("subject_confidence")
+    if sc is not None and not (0 <= sc <= 1):
+        issues.append(f"subject_confidence={sc} 超出 0-1")
+
+    sb = record.get("subject_basis")
+    if sb is not None and sb not in {"face", "appearance", "inferred", "none"}:
+        issues.append(f"subject_basis='{sb}' 非法(应为 face/appearance/inferred/none)")
+
     return issues
