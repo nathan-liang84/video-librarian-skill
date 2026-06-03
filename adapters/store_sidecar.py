@@ -45,6 +45,29 @@ class SidecarAdapter(StoreAdapter):
             encoding="utf-8",
         )
 
+    def _discover_sidecars(self) -> list[Path]:
+        roots = [self.output_dir.parent]
+        sidecars: list[Path] = []
+        seen: set[Path] = set()
+        for root in roots:
+            if not root.exists():
+                continue
+            for path in root.rglob("*.json"):
+                if path == self.index_path:
+                    continue
+                if path in seen:
+                    continue
+                seen.add(path)
+                sidecars.append(path)
+        return sorted(sidecars)
+
+    def _read_record(self, path: Path) -> Record | None:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return Record.from_dict(payload)
+        except (json.JSONDecodeError, OSError, TypeError):
+            return None
+
     def upsert_records(self, records: list[Record]) -> None:
         index = set(self._load_index())
         for record in records:
@@ -55,14 +78,11 @@ class SidecarAdapter(StoreAdapter):
         self._save_index(list(index))
 
     def rebuild_summary(self) -> None:
-        sidecars = [
-            Path(path) for path in self._load_index()
-            if Path(path).exists()
-        ]
-        records = [
-            Record.from_dict(json.loads(path.read_text(encoding="utf-8")))
-            for path in sidecars
-        ]
+        records = []
+        for path in self._discover_sidecars():
+            record = self._read_record(path)
+            if record is not None:
+                records.append(record)
 
         wb = Workbook()
         ws = wb.active

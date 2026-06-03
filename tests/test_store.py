@@ -62,3 +62,28 @@ def test_sidecar_adapter_writes_sidecar_and_summary(tmp_path):
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["id"] == "r1"
     assert (tmp_path / "output" / "_素材总表.xlsx").exists()
+
+
+def test_rebuild_summary_scans_sidecars_without_index(tmp_path):
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    sidecar = media_dir / "orphan.json"
+    sidecar.write_text(
+        json.dumps(
+            {
+                "id": "r2",
+                "media_type": "photo",
+                "original_name": "orphan.jpg",
+                "path": str(media_dir / "orphan.jpg"),
+                "status": "stored",
+                "schema_version": "1.0.0",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    adapter = SidecarAdapter(_cfg(tmp_path))
+
+    adapter.rebuild_summary()
+
+    assert (tmp_path / "output" / "_素材总表.xlsx").exists()
