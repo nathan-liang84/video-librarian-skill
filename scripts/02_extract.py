@@ -12,23 +12,213 @@ ASR:ffmpeg 抽音轨 → faster-whisper 转写(无音轨/无人声则 has_speech
 产物路径写回 record(frames 临时目录、thumbnail、sprite、transcript、has_speech),status→extracted。
 """
 import argparse
+import math
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
+
+
+def _target_frame_cap(record, cfg: dict) -> int:
+    extract_cfg = cfg.get("extract", {})
+    max_frames = int(cfg.get("models", {}).get("vision", {}).get("max_frames_per_video", 36))
+    per_minute = int(extract_cfg.get("max_frames_per_minute", 6))
+    min_short = int(extract_cfg.get("min_frames_short_clip", 3))
+    duration = record.duration_sec or 0
+    if duration and duration < 10:
+        return min(max_frames, max(min_short, 1))
+    if duration:
+        return max(1, min(max_frames, math.ceil(duration / 60) * per_minute))
+    return max_frames
+
+
+def _subsample_keep_order(paths: list[Path], cap: int) -> list[Path]:
+    if cap <= 0 or len(paths) <= cap:
+        return paths
+    step = len(paths) / cap
+    keep = {paths[int(i * step)] for i in range(cap)}
+    return [p for p in paths if p in keep]
+
+
+def _run(cmd: list[str]) -> bool:
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+
+
+def _extract_video_frames(record, workdir: Path, cfg: dict) -> list[Path]:
+    extract_cfg = cfg.get("extract", {})
+    frames_dir = workdir / record.id / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    scene_threshold = extract_cfg.get("scene_threshold", 0.4)
+    interval = extract_cfg.get("sample_interval_sec", 5)
+    _run([
+        "ffmpeg", "-y", "-i", record.path,
+        "-vf", f"select=gt(scene\\,{scene_threshold})",
+        "-vsync", "vfr",
+        str(frames_dir / "scene_%03d.jpg"),
+    ])
+    scene_frames = sorted(frames_dir.glob("scene_*.jpg"))
+
+    if len(scene_frames) < int(extract_cfg.get("min_frames_short_clip", 3)):
+        _run([
+            "ffmpeg", "-y", "-i", record.path,
+            "-vf", f"fps=1/{interval}",
+            str(frames_dir / "sample_%03d.jpg"),
+        ])
+
+    frames = sorted(frames_dir.glob("*.jpg"))
+    keep = _subsample_keep_order(frames, _target_frame_cap(record, cfg))
+    keep_set = set(keep)
+    for frame in frames:
+        if frame not in keep_set:
+            frame.unlink(missing_ok=True)
+    return keep
+
+
+def _extract_audio(record, workdir: Path) -> Path | None:
+    audio_path = workdir / record.id / "audio.wav"
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    ok = _run([
+        "ffmpeg", "-y", "-i", record.path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+        str(audio_path),
+    ])
+    return audio_path if ok and audio_path.exists() else None
+
+
+def _transcribe(audio_path: Path | None, cfg: dict) -> tuple[str | None, bool]:
+    if audio_path is None:
+        return None, False
+
+    asr_cfg = cfg.get("models", {}).get("asr", {})
+    provider = asr_cfg.get("provider", "faster-whisper")
+    if provider != "faster-whisper":
+        raise RuntimeError(f"暂不支持 ASR provider: {provider}")
+
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise RuntimeError("缺少 faster-whisper,请先安装 requirements.txt") from exc
+
+    model = WhisperModel(asr_cfg.get("model", "small"),
+                         device=asr_cfg.get("device", "auto"))
+    segments, _ = model.transcribe(str(audio_path), language=asr_cfg.get("language"))
+    text = " ".join(seg.text.strip() for seg in segments if seg.text.strip()).strip()
+    return (text or None), bool(text)
+
+
+def _make_thumbnail_from_image(src: Path, dst: Path, width: int) -> str | None:
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(src) as image:
+            ratio = width / max(image.width, 1)
+            height = max(1, int(image.height * ratio))
+            thumb = image.copy()
+            thumb.thumbnail((width, height))
+            thumb.save(dst, format="JPEG")
+        return str(dst)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _make_thumbnail(record, workdir: Path, cfg: dict, frame: Path | None = None) -> str | None:
+    width = int(cfg.get("extract", {}).get("thumbnail_width", 320))
+    src = frame if frame is not None else Path(record.path)
+    return _make_thumbnail_from_image(src, workdir / record.id / "thumbnail.jpg", width)
+
+
+def _make_sprite(frames: list[Path], workdir: Path, record_id: str) -> str | None:
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    if not frames:
+        return None
+
+    chosen = frames[:9]
+    try:
+        images = [Image.open(frame).convert("RGB") for frame in chosen]
+        thumb_w = min(img.width for img in images)
+        thumb_h = min(img.height for img in images)
+        canvas = Image.new("RGB", (thumb_w * 3, thumb_h * 3), color="black")
+        for idx, image in enumerate(images):
+            tile = image.copy()
+            tile.thumbnail((thumb_w, thumb_h))
+            x = (idx % 3) * thumb_w
+            y = (idx // 3) * thumb_h
+            canvas.paste(tile, (x, y))
+            image.close()
+        out = workdir / record_id / "sprite.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(out, format="JPEG")
+        return str(out)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _extract_record(record, workdir: Path, cfg: dict) -> None:
+    if record.media_type == "photo":
+        thumbnail = _make_thumbnail(record, workdir, cfg)
+        record.thumbnail = thumbnail or record.thumbnail
+        record.sprite = None
+        record.transcript = None
+        record.has_speech = False
+        record.status = "extracted"
+        return
+
+    frames = _extract_video_frames(record, workdir, cfg)
+    if not frames:
+        raise RuntimeError("未能抽取到视频关键帧")
+
+    record.thumbnail = _make_thumbnail(record, workdir, cfg, frames[0]) or record.thumbnail
+    if cfg.get("extract", {}).get("make_sprite", True):
+        record.sprite = _make_sprite(frames, workdir, record.id)
+
+    transcript, has_speech = _transcribe(_extract_audio(record, workdir), cfg)
+    record.transcript = transcript
+    record.has_speech = has_speech
+    record.status = "extracted"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default="state/manifest.json")
+    ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--workdir", default="tmp", help="抽帧/音轨临时目录")
     args = ap.parse_args()
 
+    cfg = load_config(Path(args.config))
     manifest = Manifest(Path(args.manifest)).load()
-    # TODO(GPT-5.4): 对 status=pending 的记录抽帧/ASR/缩略图,回写并置 extracted
+    workdir = Path(args.workdir)
+    todo = [record for record in manifest.iter_records() if record.status == "pending"]
+    if not todo:
+        print("没有待抽取的记录。")
+        return 0
+
+    for record in todo:
+        try:
+            _extract_record(record, workdir, cfg)
+            manifest.upsert(record)
+            print(f"  [extracted] {record.original_name}")
+        except Exception as exc:  # noqa: BLE001
+            record.status = "failed"
+            manifest.upsert(record)
+            print(f"  [failed] {record.original_name}: {exc}")
+
     manifest.save()
-    raise NotImplementedError
+    return 0
 
 
 if __name__ == "__main__":
