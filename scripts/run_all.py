@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""串跑入口:00→05。
+
+默认在 04_tag_name 的 dry-run 停下,给用户确认旧名→新名清单。
+显式传 --apply-rename 时才真正改名并继续 05_store。
+"""
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = ROOT / "scripts"
+
+
+def _run(script: str, *args: str) -> None:
+    cmd = [sys.executable, str(SCRIPTS / script), *args]
+    subprocess.run(cmd, cwd=ROOT, check=True)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--input", required=True, help="素材目录")
+    ap.add_argument("--manifest", default="state/manifest.json")
+    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--workdir", default="tmp")
+    ap.add_argument("--tier", choices=["quick", "refine"], default=None)
+    ap.add_argument("--apply-rename", action="store_true",
+                    help="确认 dry-run 结果后,真正执行改名并继续入库")
+    args = ap.parse_args()
+
+    _run("00_detect_env.py")
+    input_path = str(Path(args.input).resolve())
+
+    _run("01_scan.py", "--input", input_path, "--manifest", args.manifest)
+    _run("02_extract.py", "--manifest", args.manifest,
+         "--config", args.config, "--workdir", args.workdir)
+
+    understand_args = [
+        "--manifest", args.manifest,
+        "--config", args.config,
+        "--workdir", args.workdir,
+    ]
+    if args.tier:
+        understand_args += ["--tier", args.tier]
+    _run("03_understand.py", *understand_args)
+
+    _run("04_tag_name.py", "--manifest", args.manifest, "--config", args.config)
+    if not args.apply_rename:
+        print("\n已完成 dry-run。确认改名清单后,重新运行并加 --apply-rename 继续入库。")
+        return 0
+
+    _run("04_tag_name.py", "--manifest", args.manifest,
+         "--config", args.config, "--apply")
+    _run("05_store.py", "--manifest", args.manifest, "--config", args.config)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
