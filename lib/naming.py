@@ -42,7 +42,7 @@ def _people_segment(subjects: list[str]) -> str:
     cleaned = [s for s in subjects if s and s != PLACEHOLDER_NONE]
     if not cleaned:
         return ""
-    # 名册侧可能已给「寸寸和男朋友」这种组合;此处只取前两项并用「和」连接
+    # 名册侧可能已给「主角和同伴」这种组合;此处只取前两项并用「和」连接
     if len(cleaned) == 1:
         return cleaned[0]
     return "和".join(cleaned[:2])
