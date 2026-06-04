@@ -1,6 +1,7 @@
 # 核心
 PyYAML>=6.0            # 读配置/词表
 Pillow>=10.0           # 缩略图、图片处理
+pillow-heif>=0.16      # HEIC/HEIF 解码(供 lib/imaging.normalize_photo 使用;可选,未装也能跑)
 piexif>=1.1            # 照片 EXIF 读取(或用 exifread)
 openpyxl>=3.1          # 写 Excel 总表
 
