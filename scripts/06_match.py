@@ -28,7 +28,7 @@ LIBRARY_STATUSES = ("understood", "named", "stored")
 
 
 def _atoms(subjects) -> set:
-    """把人物拆成原子集合:['寸寸和男朋友'] → {'寸寸','男朋友'},便于组合匹配。
+    """把人物拆成原子集合:['主角和同伴'] → {'主角','同伴'},便于组合匹配。
     多人/空镜 本身即原子,语义保留。"""
     out = set()
     for s in subjects or []:

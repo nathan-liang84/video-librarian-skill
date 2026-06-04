@@ -3,15 +3,15 @@
 
 负责人:Opus 4.8。
 
-典型场景:主角先验把"没露脸但疑似寸寸"的素材挂成 needs_review,你扫一眼这里:
-  - 确实是寸寸 → 一键确认,推进到 understood(之后 04 命名 / 06 匹配即可纳入)
+典型场景:主角先验把"没露脸但疑似主角"的素材挂成 needs_review,你扫一眼这里:
+  - 确实是主角 → 一键确认,推进到 understood(之后 04 命名 / 06 匹配即可纳入)
   - 其实是别人 → 用 --subjects 修正后确认(如改成 多人)
 
 用法:
-  python scripts/review.py --list                       # 列出所有 needs_review
-  python scripts/review.py --confirm <id>               # 确认无误 → understood
-  python scripts/review.py --confirm <id> --subjects "寸寸和闺蜜"   # 修正人物并确认
-  python scripts/review.py --confirm all                # 批量确认全部(谨慎)
+  python scripts/review.py --list                          # 列出所有 needs_review
+  python scripts/review.py --confirm <id>                  # 确认无误 → understood
+  python scripts/review.py --confirm <id> --subjects "主角和同伴"  # 修正人物并确认
+  python scripts/review.py --confirm all                   # 批量确认全部(谨慎)
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def main() -> int:
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--list", action="store_true", help="列出所有 needs_review")
     ap.add_argument("--confirm", metavar="ID", help="确认某条(或 all)→ understood")
-    ap.add_argument("--subjects", help="确认时修正人物(用「和」连接,如 寸寸和闺蜜)")
+    ap.add_argument("--subjects", help="确认时修正人物(用「和」连接,如 主角名和同伴名)")
     args = ap.parse_args()
 
     manifest = Manifest(Path(args.manifest)).load()
@@ -53,7 +53,7 @@ def main() -> int:
         for r in pending:
             print(_fmt(r))
         if not args.confirm:
-            print("\n确认请加:--confirm <id> [--subjects \"寸寸和闺蜜\"](或 --confirm all)")
+            print("\n确认请加:--confirm <id> [--subjects \"主角名和同伴名\"](或 --confirm all)")
         return 0
 
     # 确认流程

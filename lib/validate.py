@@ -23,7 +23,7 @@ def roster_names(people_cfg: dict[str, Any]) -> set[str]:
 
 
 def _subject_atoms(subject: str) -> list[str]:
-    """把「寸寸和男朋友」拆成 ['寸寸','男朋友'] 以便逐个校验。"""
+    """把「主角和同伴」这类组合拆成 ['主角','同伴'] 以便逐个校验。"""
     return [a for a in subject.split("和") if a]
 
 

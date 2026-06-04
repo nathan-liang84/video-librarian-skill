@@ -46,7 +46,7 @@ class Record:
     description: Optional[str] = None
     scene: list[str] = field(default_factory=list)
     subjects: list[str] = field(default_factory=list)
-    # 画面主体(命名锚点):一个简短名词。人物→名册人名(寸寸),否则→物品/建筑/风景词。
+    # 画面主体(命名锚点):一个简短名词。人物→名册人名,否则→物品/建筑/风景词。
     # 由模型判断主次:谁是画面焦点就用谁。与 subjects(人物名册,供匹配)解耦。
     main_subject: Optional[str] = None
     subject_kind: Optional[str] = None   # 人物|物品|建筑|风景|动物|食物|其他

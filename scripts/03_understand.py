@@ -29,7 +29,7 @@ VISION_FIELDS = ["scene", "subjects", "actions", "shot_type", "camera_move",
 
 
 def _subject_atoms(subjects) -> set:
-    """['寸寸和多人'] → {'寸寸','多人'},便于判断主角是否在内。"""
+    """['主角和多人'] → {'主角','多人'},便于判断主角是否在内。"""
     out: set = set()
     for s in subjects or []:
         for a in str(s).split("和"):
