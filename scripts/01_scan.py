@@ -29,6 +29,10 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 # 动态部分固定是 .mov。配对后:照片记录写 live_motion_path 指向该 .mov;
 # .mov 自身记 status=live_motion_skip(分支终态),后续 02-06 一律跳过、06 不召回。
 _LIVE_MOTION_EXTS = {".mov"}
+# 静态分量只认 iOS Live Photo 实际导出的格式(HEIC/JPEG)。
+# .png/.webp 不是 Live Photo 静态格式 —— 它们与同名 .mov 同目录纯属巧合,
+# 不可据此把那条 .mov 判为动态分量并抑制(否则会静默丢掉真实视频)。
+_LIVE_STILL_EXTS = {".heic", ".heif", ".jpg", ".jpeg"}
 
 
 # Windows 系统垃圾(不以 '.' 开头,按文件名整体匹配,大小写不敏感)
@@ -185,14 +189,15 @@ def probe_photo(path: Path) -> dict[str, Any]:
 def pair_live_photos(media: list[tuple[Path, str]]) -> dict[Path, Path]:
     """识别 Live Photo 配对,返回 {动态 .mov 路径: 配对的照片路径}。
 
-    判定:同目录、同主名(不分大小写)下【恰好】一张照片 + 一个 .mov 才配对;
-    一旦该主名下有多张照片或多个 .mov(歧义)则不配对,避免误伤真实视频。"""
+    判定:同目录、同主名(不分大小写)下【恰好】一张 Live Photo 静态图(HEIC/JPEG)
+    + 一个 .mov 才配对;静态侧只认 `_LIVE_STILL_EXTS`(.png/.webp 等不算,见上注释)。
+    一旦该主名下有多张静态图或多个 .mov(歧义)则不配对,避免误伤真实视频。"""
     groups: dict[tuple[str, str], dict[str, list[Path]]] = {}
     for path, media_type in media:
         key = (str(path.parent), path.stem.lower())
         bucket = groups.setdefault(key, {"photo": [], "motion": []})
-        if media_type == "photo":
-            bucket["photo"].append(path)
+        if media_type == "photo" and path.suffix.lower() in _LIVE_STILL_EXTS:
+            bucket["photo"].append(path)        # 只有 HEIC/JPEG 才算 Live Photo 静态分量
         elif path.suffix.lower() in _LIVE_MOTION_EXTS:
             bucket["motion"].append(path)
     pairs: dict[Path, Path] = {}
