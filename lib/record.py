@@ -29,6 +29,11 @@ class Record:
     status: str = "pending"
     schema_version: str = SCHEMA_VERSION
 
+    # P1b-1: 目录级内容类型聚合。01_scan 扫描时根据目录下媒体类型推断并写入:
+    #   仅视频 -> "video";仅照片 -> "photo";两者都有 -> "mixed"
+    # 旧数据(None)消费者应回退到 media_type(见 effective_content_kind 属性)。
+    # 字段改动属章程 §8 契约红线,必走 Opus 评审。
+    content_kind: Optional[str] = None
     new_name: Optional[str] = None
     thumbnail: Optional[str] = None
     sprite: Optional[str] = None
@@ -75,6 +80,15 @@ class Record:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @property
+    def effective_content_kind(self) -> str:
+        """P1b-1:对外的 content_kind 读取接口。优先用显式 content_kind,回退到 media_type。
+
+        用途:消费方(04 命名、06 匹配、adapters 写入、review UI 等)无需自己处理 None;
+        老 manifest/旁车没 content_kind 字段时自动按 media_type 走,保持向后兼容。
+        """
+        return self.content_kind or self.media_type
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Record":

@@ -7,6 +7,11 @@
   "properties": {
     "id": { "type": "string", "description": "文件内容指纹(SHA1 前16位),去重主键" },
     "media_type": { "type": "string", "enum": ["video", "photo"] },
+    "content_kind": {
+      "type": ["string", "null"],
+      "enum": ["video", "photo", "mixed", null],
+      "description": "P1b-1: 目录级内容类型。01_scan 聚合扫描目录下所有媒体的 media_type 后写入 —— 仅视频=video、仅照片=photo、两者都有=mixed。旧数据(null)消费者应回退到 media_type。改字段必走 Opus 评审(章程 §8)。"
+    },
     "original_name": { "type": "string" },
     "new_name": { "type": ["string", "null"], "description": "规范化新文件名(简短)" },
     "path": { "type": "string", "description": "当前路径/云盘相对路径" },

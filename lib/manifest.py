@@ -62,6 +62,16 @@ class Manifest:
             return False
         return _rank(rec.status) >= _rank(target_status) >= 0
 
+    def filter_by_content_kind(self, content_kind: str) -> Iterator[Record]:
+        """P1b-1:按 content_kind 过滤记录。None 记录(老 manifest)不匹配任何值。
+
+        消费者如需把 None 回退为 media_type,应先 ``record.effective_content_kind`` 再过滤;
+        本方法只做精确匹配,避免对"未聚合"与"已聚合 mixed"的隐式混淆。
+        """
+        for rec in self._records.values():
+            if rec.content_kind == content_kind:
+                yield rec
+
     def iter_records(self) -> Iterator[Record]:
         return iter(self._records.values())
 

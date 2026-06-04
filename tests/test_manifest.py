@@ -47,3 +47,47 @@ def test_iter_pending_include_failed():
     m = _manifest()
     ids = {r.id for r in m.iter_pending("understood", include_failed=True)}
     assert "f" in ids
+
+
+# ---------- P1b-1: filter_by_content_kind ----------
+
+def _mk_with_kind(rid, media_type, content_kind):
+    return Record(id=rid, media_type=media_type, original_name=f"{rid}.bin",
+                  path=f"{rid}.bin", content_kind=content_kind)
+
+
+def test_filter_by_content_kind_video():
+    m = Manifest(Path("state/_test_manifest_ck.json"))
+    m.upsert(_mk_with_kind("v1", "video", "video"))
+    m.upsert(_mk_with_kind("v2", "video", "mixed"))    # mixed 不匹配
+    m.upsert(_mk_with_kind("p1", "photo", "photo"))
+    m.upsert(_mk_with_kind("p2", "photo", "mixed"))    # mixed 不匹配
+    out = {r.id for r in m.filter_by_content_kind("video")}
+    assert out == {"v1"}
+
+
+def test_filter_by_content_kind_mixed():
+    m = Manifest(Path("state/_test_manifest_ck.json"))
+    m.upsert(_mk_with_kind("v1", "video", "video"))
+    m.upsert(_mk_with_kind("v2", "video", "mixed"))
+    m.upsert(_mk_with_kind("p1", "photo", "photo"))
+    m.upsert(_mk_with_kind("p2", "photo", "mixed"))
+    out = {r.id for r in m.filter_by_content_kind("mixed")}
+    assert out == {"v2", "p2"}
+
+
+def test_filter_by_content_kind_skips_legacy_none_records():
+    """P1b-1:None 记录(老 manifest)不匹配任何值 —— 本方法是精确匹配,
+    None↔media_type 回退是消费者的职责(用 effective_content_kind)。"""
+    m = Manifest(Path("state/_test_manifest_ck.json"))
+    m.upsert(_mk_with_kind("v1", "video", "video"))     # 显式
+    m.upsert(_mk_with_kind("v2", "video", None))         # 旧数据:None
+    out = {r.id for r in m.filter_by_content_kind("video")}
+    assert out == {"v1"}, "None 记录不参与匹配"
+
+
+def test_filter_by_content_kind_returns_empty_when_no_match():
+    m = Manifest(Path("state/_test_manifest_ck.json"))
+    m.upsert(_mk_with_kind("v1", "video", "video"))
+    out = list(m.filter_by_content_kind("photo"))
+    assert out == []
