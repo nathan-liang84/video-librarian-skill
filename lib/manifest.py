@@ -18,7 +18,11 @@ from .record import Record
 
 DEFAULT_PATH = Path("state/manifest.json")
 
-# 线性进度顺序(needs_review / failed 不在其中,视为"未完成"以便复核/重试)
+# 线性进度顺序(needs_review / failed / live_motion_skip 不在其中)。
+#   needs_review / failed → 视为"未完成",便于复核/重试;
+#   live_motion_skip → 分支型终态:配对中被抑制的 Live Photo 动态 MOV,各阶段一律跳过。
+# 注意:不在 PROGRESS 内的状态 _rank 返回 -1,has_done 恒为 False;
+# 各阶段按【精确 status】取件(02 取 pending、03 取 extracted…),因此终态天然被排除。
 PROGRESS = ["pending", "extracted", "understood", "named", "stored"]
 
 

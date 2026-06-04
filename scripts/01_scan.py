@@ -25,6 +25,15 @@ from lib.record import Record  # noqa: E402
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
+# Live Photo:iOS 把静态图 + 一小段动态视频按【同目录、同文件名(扩展名不同)】成对导出,
+# 动态部分固定是 .mov。配对后:照片记录写 live_motion_path 指向该 .mov;
+# .mov 自身记 status=live_motion_skip(分支终态),后续 02-06 一律跳过、06 不召回。
+_LIVE_MOTION_EXTS = {".mov"}
+# 静态分量只认 iOS Live Photo 实际导出的格式(HEIC/JPEG)。
+# .png/.webp 不是 Live Photo 静态格式 —— 它们与同名 .mov 同目录纯属巧合,
+# 不可据此把那条 .mov 判为动态分量并抑制(否则会静默丢掉真实视频)。
+_LIVE_STILL_EXTS = {".heic", ".heif", ".jpg", ".jpeg"}
+
 
 # Windows 系统垃圾(不以 '.' 开头,按文件名整体匹配,大小写不敏感)
 _WIN_JUNK = {"thumbs.db", "desktop.ini", "ehthumbs.db"}
@@ -177,15 +186,41 @@ def probe_photo(path: Path) -> dict[str, Any]:
         return {}
 
 
-def build_record(path: Path, media_type: str) -> Record:
-    metadata = probe_video(path) if media_type == "video" else probe_photo(path)
+def pair_live_photos(media: list[tuple[Path, str]]) -> dict[Path, Path]:
+    """识别 Live Photo 配对,返回 {动态 .mov 路径: 配对的照片路径}。
+
+    判定:同目录、同主名(不分大小写)下【恰好】一张 Live Photo 静态图(HEIC/JPEG)
+    + 一个 .mov 才配对;静态侧只认 `_LIVE_STILL_EXTS`(.png/.webp 等不算,见上注释)。
+    一旦该主名下有多张静态图或多个 .mov(歧义)则不配对,避免误伤真实视频。"""
+    groups: dict[tuple[str, str], dict[str, list[Path]]] = {}
+    for path, media_type in media:
+        key = (str(path.parent), path.stem.lower())
+        bucket = groups.setdefault(key, {"photo": [], "motion": []})
+        if media_type == "photo" and path.suffix.lower() in _LIVE_STILL_EXTS:
+            bucket["photo"].append(path)        # 只有 HEIC/JPEG 才算 Live Photo 静态分量
+        elif path.suffix.lower() in _LIVE_MOTION_EXTS:
+            bucket["motion"].append(path)
+    pairs: dict[Path, Path] = {}
+    for bucket in groups.values():
+        if len(bucket["photo"]) == 1 and len(bucket["motion"]) == 1:
+            pairs[bucket["motion"][0]] = bucket["photo"][0]
+    return pairs
+
+
+def build_record(path: Path, media_type: str, *,
+                 live_motion_path: str | None = None,
+                 status: str = "pending", probe: bool = True) -> Record:
+    metadata = {}
+    if probe:
+        metadata = probe_video(path) if media_type == "video" else probe_photo(path)
     shot_at = metadata.get("shot_at") or _fallback_shot_at(path)
     return Record(
         id=sha1_file(path)[:16],
         media_type=media_type,
         original_name=path.name,
         path=str(path),
-        status="pending",
+        status=status,
+        live_motion_path=live_motion_path,
         filesize_mb=round(path.stat().st_size / (1024 * 1024), 3),
         duration_sec=metadata.get("duration_sec"),
         resolution=metadata.get("resolution"),
@@ -208,9 +243,8 @@ def main() -> int:
     if not input_dir.exists():
         raise FileNotFoundError(f"素材目录不存在: {input_dir}")
 
-    seen_ids = set()
-    added = 0
-    skipped = 0
+    # 第一遍:收集媒体文件(顺带计垃圾),以便整体判断 Live Photo 配对
+    media: list[tuple[Path, str]] = []
     junk = 0
     for path in sorted(input_dir.rglob("*")):
         if not path.is_file():
@@ -221,8 +255,25 @@ def main() -> int:
         media_type = detect_media_type(path)
         if media_type is None:
             continue
+        media.append((path, media_type))
 
-        record = build_record(path, media_type)
+    motion_to_photo = pair_live_photos(media)
+    photo_to_motion = {photo: motion for motion, photo in motion_to_photo.items()}
+
+    # 第二遍:建记录。配对的 .mov → live_motion_skip(不探测元数据);配对的照片 → 记 live_motion_path
+    seen_ids = set()
+    added = 0
+    skipped = 0
+    live_skipped = 0
+    for path, media_type in media:
+        if path in motion_to_photo:
+            record = build_record(path, media_type, status="live_motion_skip", probe=False)
+        elif path in photo_to_motion:
+            record = build_record(path, media_type,
+                                  live_motion_path=str(photo_to_motion[path]))
+        else:
+            record = build_record(path, media_type)
+
         if record.id in seen_ids or manifest.get(record.id) is not None:
             skipped += 1
             continue
@@ -230,9 +281,13 @@ def main() -> int:
         seen_ids.add(record.id)
         manifest.upsert(record)
         added += 1
+        if record.status == "live_motion_skip":
+            live_skipped += 1
 
     manifest.save()
     msg = f"扫描完成: 新增 {added} 条, 跳过重复 {skipped} 条"
+    if live_skipped:
+        msg += f", Live Photo 动态分量 {live_skipped} 个(配对后不单独入库)"
     if junk:
         msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
     print(msg)
