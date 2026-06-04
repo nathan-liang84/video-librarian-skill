@@ -19,12 +19,14 @@
 
 - 媒体:**视频 + 照片**
 - 内容理解:画面(M3 看关键帧)+ 语音(本地 ASR)双通道融合
-- 人物:**预设人物名册 + 参考图引导识别**(主角固定,由用户在配置时指定姓名并上传参考图;不做自动人脸聚类——留给大众版)
-- 命名:`时间_人物_场景`,简短、安全、可回滚
+- 人物:**预设人物名册 + 参考图引导识别**(主角由用户配置;大众版任意陌生人聚类见"照片增强规划")
+- 命名:`时间_主体_场景`,简短、安全、可回滚
 - 数据层:可插拔双模式 —— ① 飞书多维表格;② JSON 旁车文件 + Excel/CSV(适合只有云盘的用户)
 - 模型:**MiniMax M3** 看画面 + **MiniMax M2.7** 处理文本 + 本地 **faster-whisper** 转写
 
-未来扩展:自动人脸聚类、通用大众版照片整理 —— 作为**独立 skill** 开发,见 [photo-librarian-skill](https://github.com/nathan-liang84/photo-librarian-skill)。
+**照片增强规划(并入本 skill)**:HEIC 格式兼容、EXIF 方向修正、Live Photo 配对、垃圾过滤、近重复归组、InsightFace 人脸聚类 —— 剪辑素材视角的照片能力全部在本仓库实现,详见 [docs/PHOTO_PIPELINE.md](docs/PHOTO_PIPELINE.md)。
+
+**仍独立的方向**:面向普通人的通用大众相册整理(任意陌生人命名、生活事件/地点/时间线)—— 见 [photo-librarian-skill](https://github.com/nathan-liang84/photo-librarian-skill)。
 
 ## 目录结构
 
