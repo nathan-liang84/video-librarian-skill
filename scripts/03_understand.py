@@ -62,6 +62,11 @@ def is_tentative_main(record, people_cfg: dict, conf_thresh: float) -> bool:
 
 def _frames_for(record, workdir: Path) -> list[Path]:
     if record.media_type == "photo":
+        # P1a-B-2:照片优先读 02 产出的归一化帧(摆正 + HEIC→jpg);
+        # 不存在(02 失败/未跑/是视频类)才退回 record.path 原图。
+        normalized = workdir / record.id / "frames" / "photo.jpg"
+        if normalized.is_file():
+            return [normalized]
         p = Path(record.path)
         return [p] if p.exists() else []
     fdir = workdir / record.id / "frames"

@@ -21,9 +21,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
 from lib.record import Record  # noqa: E402
+from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 — 读 HEIC/HEIF EXIF)
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
-PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
+PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 
 # Live Photo:iOS 把静态图 + 一小段动态视频按【同目录、同文件名(扩展名不同)】成对导出,
 # 动态部分固定是 .mov。配对后:照片记录写 live_motion_path 指向该 .mov;
@@ -152,6 +153,14 @@ def probe_video(path: Path) -> dict[str, Any]:
 
 
 def probe_photo(path: Path) -> dict[str, Any]:
+    # P1a-B-2:HEIC/HEIF 需要 pillow-heif 已被注册,PIL.Image.open 才能读到 EXIF。
+    # 未装时 register_heif() 静默返回 False;万一它自身抛(用户 monkeypatch / 极端情况),
+    # 这里再包一层 try/except,绝不让它把 probe_photo 弄崩 —— 缺能力是常态,不是异常。
+    try:
+        register_heif()
+    except Exception:  # noqa: BLE001
+        pass
+
     try:
         from PIL import ExifTags, Image
     except ImportError:

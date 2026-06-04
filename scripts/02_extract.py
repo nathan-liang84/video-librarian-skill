@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
+from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 — 照片归一化)
 
 
 def _target_frame_cap(record, cfg: dict) -> int:
@@ -133,6 +134,24 @@ def _make_thumbnail_from_image(src: Path, dst: Path, width: int) -> str | None:
         return None
 
 
+def _normalize_photo_frame(record, workdir: Path) -> str | None:
+    """P1a-B-2:把照片按 EXIF Orientation 摆正并转为 RGB JPEG 存到
+    ``tmp/<record.id>/frames/photo.jpg``。HEIC/HEIF 通过 register_heif() 解码。
+    任何异常(缺依赖/文件损坏/格式不支持)一律返回 ``None``,不崩管线。
+    03 优先读这里的归一化帧;不存在退回 ``record.path`` 原图。
+    """
+    try:
+        from lib.imaging import normalize_photo  # 局部 import 避免冷启动拖慢 视频管线
+    except ImportError:
+        return None
+    # register_heif 幂等且不抛,这里再调一次确保 HEIC 编码可读
+    register_heif()
+    frames_dir = workdir / record.id / "frames"
+    normalized = frames_dir / "photo.jpg"
+    ok = normalize_photo(Path(record.path), normalized)
+    return str(normalized) if ok and normalized.is_file() else None
+
+
 def _make_thumbnail(record, workdir: Path, cfg: dict, frame: Path | None = None) -> str | None:
     width = int(cfg.get("extract", {}).get("thumbnail_width", 320))
     src = frame if frame is not None else Path(record.path)
@@ -170,6 +189,9 @@ def _make_sprite(frames: list[Path], workdir: Path, record_id: str) -> str | Non
 
 def _extract_record(record, workdir: Path, cfg: dict) -> None:
     if record.media_type == "photo":
+        # P1a-B-2:产出归一化帧(摆正 + HEIC→jpg),供 03 优先读取;
+        # 失败时归一化帧不写记录,03 自然退回原图路径,不崩。
+        _normalize_photo_frame(record, workdir)
         thumbnail = _make_thumbnail(record, workdir, cfg)
         record.thumbnail = thumbnail or record.thumbnail
         record.sprite = None
