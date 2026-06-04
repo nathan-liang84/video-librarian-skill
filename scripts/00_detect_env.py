@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from lib.config import load_config, validate_config  # noqa: E402
 from lib.imaging import heif_available  # noqa: E402  (Atlas: 照片归一化所需 HEIC 支持探测)
+from lib.triage import _imagehash_available  # noqa: E402  (Atlas: 近重复归组所需 imagehash 探测)
 
 
 def _ffmpeg_hint() -> str:
@@ -64,6 +65,10 @@ def main() -> int:
     print(f"  [{'✓' if heif_ok else '✗'}] HEIC/HEIF 解码 (pillow-heif)"
           + ("" if heif_ok else "  → pip install pillow-heif"
                                   "(非致命,缺则 HEIC 照片无法归一化,其它格式不受影响)"))
+    phash_ok = _imagehash_available()
+    print(f"  [{'✓' if phash_ok else '✗'}] 近重复归组 (imagehash + PIL)"
+          + ("" if phash_ok else "  → pip install imagehash"
+                                  "(非致命,缺则 pHash/近重复归组返 None,垃圾启发式仍可用)"))
     print("== 配置 ==")
     cfg = ROOT / "config" / "config.yaml"
     cfg_ok = cfg.exists()
