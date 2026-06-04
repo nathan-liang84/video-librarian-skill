@@ -3,6 +3,7 @@
 
 缺什么报清楚 + 怎么装,绝不静默。负责人:GPT-5.4(可在此骨架上扩展)。
 """
+import platform
 import shutil
 import sys
 from pathlib import Path
@@ -11,6 +12,19 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from lib.config import load_config, validate_config  # noqa: E402
+
+
+def _ffmpeg_hint() -> str:
+    """按当前操作系统给出对应的 ffmpeg 安装提示(跨平台,别只提 brew)。"""
+    osname = platform.system()
+    if osname == "Windows":
+        return ("winget install ffmpeg(或 choco install ffmpeg / "
+                "scoop install ffmpeg),装后确保 ffmpeg 在 PATH")
+    if osname == "Darwin":
+        return "brew install ffmpeg"
+    if osname == "Linux":
+        return "apt install ffmpeg(Debian/Ubuntu)或 dnf install ffmpeg(Fedora)"
+    return "见 https://ffmpeg.org/download.html"
 
 
 def check_binary(name: str, hint: str) -> bool:
@@ -33,7 +47,7 @@ def check_python_dep(mod: str, pip_name: str | None = None) -> bool:
 def main() -> int:
     print("== 系统工具 ==")
     bins = [
-        check_binary("ffmpeg", "https://ffmpeg.org 或 brew install ffmpeg"),
+        check_binary("ffmpeg", _ffmpeg_hint()),
         check_binary("ffprobe", "随 ffmpeg 一起安装"),
     ]
     print("== Python 依赖 ==")

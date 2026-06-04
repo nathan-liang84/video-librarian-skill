@@ -26,10 +26,16 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
 
+# Windows 系统垃圾(不以 '.' 开头,按文件名整体匹配,大小写不敏感)
+_WIN_JUNK = {"thumbs.db", "desktop.ini", "ehthumbs.db"}
+
+
 def is_junk_name(name: str) -> bool:
-    """macOS/系统垃圾文件:AppleDouble 资源叉(._foo.MOV)、隐藏点文件(.DS_Store 等)。
-    这些名字以 '.' 开头但扩展名可能伪装成 .mov/.jpg,必须按文件名而非扩展名排除。"""
-    return name.startswith(".")
+    """跨平台系统垃圾文件:
+    - macOS:AppleDouble 资源叉(._foo.MOV)、隐藏点文件(.DS_Store 等),以 '.' 开头;
+    - Windows:Thumbs.db / desktop.ini 等(不以 '.' 开头,需整名匹配)。
+    这些名字的扩展名可能伪装成 .mov/.jpg,必须按文件名而非扩展名排除。"""
+    return name.startswith(".") or name.lower() in _WIN_JUNK
 
 
 def detect_media_type(path: Path) -> str | None:

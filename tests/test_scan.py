@@ -89,6 +89,14 @@ def test_is_junk_name_skips_appledouble_and_hidden():
     assert scan.is_junk_name("IMG_0003.MOV") is False
 
 
+def test_is_junk_name_skips_windows_junk():
+    scan = _load_scan_module()
+    assert scan.is_junk_name("Thumbs.db") is True
+    assert scan.is_junk_name("desktop.ini") is True
+    assert scan.is_junk_name("DESKTOP.INI") is True          # 大小写不敏感
+    assert scan.is_junk_name("vacation.jpg") is False
+
+
 def test_detect_media_type_rejects_junk_even_with_media_ext():
     scan = _load_scan_module()
     # ._foo.mov 扩展名是 .mov,但属 AppleDouble 资源叉,必须按文件名排除
