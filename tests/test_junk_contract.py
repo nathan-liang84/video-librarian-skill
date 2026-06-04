@@ -21,8 +21,9 @@ def _load(mod_name: str, rel: str):
 
 # ---------- 字段 / 状态契约 ----------
 
-def test_junk_status_registered():
+def test_junk_and_grouped_status_registered():
     assert "junk" in STATUSES
+    assert "grouped" in STATUSES
 
 
 def test_triage_fields_roundtrip():
@@ -106,15 +107,46 @@ def test_store_is_idempotent_for_junk(tmp_path, monkeypatch):
     assert Manifest(mpath).load().get("j").status == "stored"
 
 
-# ---------- 06_match:垃圾不参与召回 ----------
+def test_store_persists_grouped_member_as_minimal_record(tmp_path, monkeypatch):
+    """近重复非代表成员(status=grouped)应入库(→stored),保留 is_representative=False+group_id。"""
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "burst2.jpg").write_bytes(b"img")
+    cfg = {"store": {"mode": "sidecar",
+                     "sidecar": {"output_dir": str(tmp_path / "output"),
+                                 "summary_file": "_素材总表.xlsx",
+                                 "media_root": str(media_dir)}}}
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    mpath = tmp_path / "manifest.json"
+    m = Manifest(mpath).load()
+    m.upsert(Record(id="mem", media_type="photo", original_name="burst2.jpg",
+                    path=str(media_dir / "burst2.jpg"), status="grouped",
+                    is_representative=False, group_id="g", group_size=2))
+    m.save()
+    store = _load("store05c", "scripts/05_store.py")
+    monkeypatch.setattr(sys, "argv",
+                        ["05_store.py", "--config", str(cfg_path), "--manifest", str(mpath)])
+    assert store.main() == 0
+    after = Manifest(mpath).load().get("mem")
+    assert after.status == "stored"
+    assert after.is_representative is False
+    assert after.group_id == "g"
 
-def test_match_drops_junk_from_library():
+
+# ---------- 06_match:垃圾 / 近重复非代表成员不参与召回 ----------
+
+def test_match_recallable_drops_junk_and_grouped_members():
     match = _load("match06", "scripts/06_match.py")
     lib = [
-        Record(id="ok", media_type="photo", original_name="a.jpg", path="/a.jpg",
-               status="stored"),
+        Record(id="solo", media_type="photo", original_name="a.jpg", path="/a.jpg",
+               status="stored"),                                    # 独立项 → 保留
+        Record(id="rep", media_type="photo", original_name="r.jpg", path="/r.jpg",
+               status="stored", is_representative=True, group_id="g"),   # 代表 → 保留
+        Record(id="mem", media_type="photo", original_name="m.jpg", path="/m.jpg",
+               status="stored", is_representative=False, group_id="g"),  # 成员 → 排除
         Record(id="bad", media_type="photo", original_name="b.png", path="/b.png",
-               status="stored", is_junk=True),
+               status="stored", is_junk=True),                          # 垃圾 → 排除
     ]
-    kept = match._drop_junk(lib)
-    assert [r.id for r in kept] == ["ok"]
+    kept = {r.id for r in match._recallable(lib)}
+    assert kept == {"solo", "rep"}

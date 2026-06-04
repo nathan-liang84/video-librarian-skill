@@ -22,6 +22,7 @@ DEFAULT_PATH = Path("state/manifest.json")
 #   needs_review / failed → 视为"未完成",便于复核/重试;
 #   live_motion_skip → 分支型终态:配对中被抑制的 Live Photo 动态 MOV,各阶段一律跳过。
 #   junk            → 分支型终态:判为垃圾的照片;跳过 02/03/04,05 仅存最小记录,06 不召回。
+#   grouped         → 分支型终态:近重复/连拍非代表成员;跳过 02/03/04,05 存最小记录,06 不召回。
 # 注意:不在 PROGRESS 内的状态 _rank 返回 -1,has_done 恒为 False;
 # 各阶段按【精确 status】取件(02 取 pending、03 取 extracted…),因此终态天然被排除。
 PROGRESS = ["pending", "extracted", "understood", "named", "stored"]

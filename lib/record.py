@@ -19,8 +19,11 @@ from . import SCHEMA_VERSION
 #   junk            = 判为垃圾的照片(截图/翻拍/表情包);01b_photo_triage 置入。
 #                     跳过 02/03/04 不烧 API;05 仍存"最小记录"(可后置 audit);
 #                     06 不召回。--include-junk 可让其重新走完整流程。
-STATUSES = ["pending", "extracted", "understood", "named",
-            "stored", "needs_review", "failed", "live_motion_skip", "junk"]
+#   grouped         = 近重复/连拍组里的【非代表】成员;01b_photo_triage 置入。
+#                     代表(is_representative=True)留 pending 正常精理解;成员跳过 02/03/04
+#                     不烧 API;05 存最小记录(带 group_id);06 不召回(经 group_id 可发现)。
+STATUSES = ["pending", "extracted", "understood", "named", "stored",
+            "needs_review", "failed", "live_motion_skip", "junk", "grouped"]
 
 
 @dataclass

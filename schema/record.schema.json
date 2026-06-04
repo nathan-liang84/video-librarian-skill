@@ -65,7 +65,7 @@
     "keyword": { "type": ["string", "null"], "description": "命名用关键词(2-4字),03 产出" },
 
     "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-    "status": { "type": "string", "enum": ["pending", "extracted", "understood", "named", "stored", "needs_review", "failed", "live_motion_skip", "junk"] },
+    "status": { "type": "string", "enum": ["pending", "extracted", "understood", "named", "stored", "needs_review", "failed", "live_motion_skip", "junk", "grouped"] },
     "schema_version": { "type": "string" },
     "processed_at": { "type": ["string", "null"], "format": "date-time" }
   }
