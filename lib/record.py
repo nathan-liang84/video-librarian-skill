@@ -14,8 +14,10 @@ from . import SCHEMA_VERSION
 
 # status 流转:pending → extracted → understood → named → stored
 # 任一阶段异常 → failed;低置信/低画质 → needs_review
+# 分支型终态(不进线性进度,后续阶段一律跳过):
+#   live_motion_skip = Live Photo 配对中被抑制的动态 MOV(照片侧已记 live_motion_path)
 STATUSES = ["pending", "extracted", "understood", "named",
-            "stored", "needs_review", "failed"]
+            "stored", "needs_review", "failed", "live_motion_skip"]
 
 
 @dataclass
@@ -30,6 +32,8 @@ class Record:
     new_name: Optional[str] = None
     thumbnail: Optional[str] = None
     sprite: Optional[str] = None
+    # Live Photo:照片记录指向配对的动态 .mov;该 .mov 自身记 status=live_motion_skip
+    live_motion_path: Optional[str] = None
 
     # 技术元数据(01_scan / 02_extract 填)
     duration_sec: Optional[float] = None

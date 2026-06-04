@@ -136,3 +136,75 @@ def test_build_record_falls_back_to_file_mtime(tmp_path, monkeypatch):
     record = scan.build_record(photo, "photo")
 
     assert record.shot_at is not None
+
+
+def test_pair_live_photos_matches_same_stem_photo_and_mov():
+    scan = _load_scan_module()
+    d = Path("/album")
+    media = [
+        (d / "IMG_1.HEIC", "photo"),
+        (d / "IMG_1.MOV", "video"),     # Live Photo 动态分量(同名同目录)
+        (d / "IMG_2.mp4", "video"),     # 普通视频,无配对
+    ]
+    pairs = scan.pair_live_photos(media)
+    assert pairs == {d / "IMG_1.MOV": d / "IMG_1.HEIC"}
+
+
+def test_pair_live_photos_skips_ambiguous_groups():
+    scan = _load_scan_module()
+    d = Path("/album")
+    # 同主名下两张照片 + 一个 mov:歧义,不配对(避免误伤)
+    media = [
+        (d / "x.jpg", "photo"),
+        (d / "x.png", "photo"),
+        (d / "x.mov", "video"),
+    ]
+    assert scan.pair_live_photos(media) == {}
+    # 真实独立视频不应被当作 live motion
+    assert scan.pair_live_photos([(d / "solo.mov", "video")]) == {}
+
+
+def test_scan_pairs_live_photo_and_skips_motion(tmp_path):
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "IMG_9.heic").write_bytes(b"live-still")
+    (media_dir / "IMG_9.mov").write_bytes(b"live-motion")
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    by_name = {rec["original_name"]: rec for rec in payload.values()}
+
+    photo = by_name["IMG_9.heic"]
+    motion = by_name["IMG_9.mov"]
+    assert photo["media_type"] == "photo"
+    assert photo["status"] == "pending"
+    assert photo["live_motion_path"].endswith("IMG_9.mov")
+    assert motion["status"] == "live_motion_skip"
+    assert "Live Photo 动态分量 1 个" in result.stdout
+
+
+def test_scan_keeps_unpaired_mov_as_normal_video(tmp_path):
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "solo.mov").write_bytes(b"a-real-clip")
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    rec = next(iter(payload.values()))
+    assert rec["media_type"] == "video"
+    assert rec["status"] == "pending"
+    assert rec["live_motion_path"] is None

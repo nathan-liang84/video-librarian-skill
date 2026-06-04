@@ -12,6 +12,7 @@
     "path": { "type": "string", "description": "当前路径/云盘相对路径" },
     "thumbnail": { "type": ["string", "null"], "description": "缩略图路径;视频另含雪碧图" },
     "sprite": { "type": ["string", "null"] },
+    "live_motion_path": { "type": ["string", "null"], "description": "Live Photo 配对的动态 .mov 路径;该 .mov 自身记 status=live_motion_skip" },
 
     "duration_sec": { "type": ["number", "null"] },
     "resolution": { "type": ["string", "null"] },
@@ -57,7 +58,7 @@
     "keyword": { "type": ["string", "null"], "description": "命名用关键词(2-4字),03 产出" },
 
     "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-    "status": { "type": "string", "enum": ["pending", "extracted", "understood", "named", "stored", "needs_review", "failed"] },
+    "status": { "type": "string", "enum": ["pending", "extracted", "understood", "named", "stored", "needs_review", "failed", "live_motion_skip"] },
     "schema_version": { "type": "string" },
     "processed_at": { "type": ["string", "null"], "format": "date-time" }
   }
