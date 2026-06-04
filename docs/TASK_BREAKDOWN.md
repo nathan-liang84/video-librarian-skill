@@ -53,6 +53,22 @@
 4. **接口契约(`lib/`、`schema/`、`adapters/base.py`、`lib/models.py`)改动需 Opus 评审**,因为会牵动多方。
 5. 提交信息说明改了哪个阶段、是否影响契约。
 
+## 任务认领协议(多 agent)
+
+各 agent(Codex / Atlas)在 GitHub 上**没有独立账号**,无法用 assignee 派活。因此:
+
+- **GitHub Issue = 任务规格书 + 进度看板**;由协调方(用户 / Opus)在各自工具里把 agent 指向对应 issue。
+- **归属与可否开工用标签表示**:
+  - `agent:opus` / `agent:codex` / `agent:atlas` —— 这条归谁;
+  - `claimable` —— 依赖已就绪,可立刻开工;
+  - `blocked` —— 被依赖卡住,先别动(issue 正文写明依赖哪几个 PR/issue)。
+- **认领与交付三步(每个 agent 必做)**:
+  1. 在目标 issue 下评论一句「<名字> 认领」(留痕,避免撞车);
+  2. 从最新 `main` 开分支(`feat/...`),**只动 issue 列出的文件**;
+  3. `pytest -q` 全绿后提 PR,描述写 `Closes #<编号>`(合并即自动关 issue)。
+- **铁律:不自审、不自合**。作者 ≠ 审查者(见上"评审第一原则")。Atlas 写的 → Opus/GPT-5.5 复审;Codex 写的 → Opus 终审高风险 + GPT-5.5;Opus 写的 → GPT-5.5 复审。
+- 查"现在谁能干什么":`gh issue list --label claimable` / `gh issue list --label agent:atlas`。
+
 ## 给 Codex 的"即可开工"清单(建议顺序)
 
 依赖关系:`config/record/manifest` → `01` → `02` → `05`。Codex 可先做这条主链,03/04/06 由 Opus 并行推进。
