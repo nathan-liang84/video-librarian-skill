@@ -22,19 +22,23 @@
 |---|---|:--:|---|
 | ① 读取/列目录/拿元数据 | `xpan/file?method=list`、`xpan/multimedia?method=filemetas`(含 `md5`/`size`/`thumbs`/`dlink`) | ✅ | 零(只读元数据) |
 | ② 理解→生成总结 JSON | 视频走 `xpan/file?method=streaming`(HLS/M3U8)只抽关键帧;照片小文件经 `dlink` 直下 | ✅ | **低**(不下整片) |
-| ② JSON 写回网盘 | 三步上传 `precreate → superfile2/upload → create`(JSON 很小) | ✅ | 极低 |
-| ③ 改名 | `xpan/file?method=filemanager&opera=rename` | ✅ | 零 |
+| ② JSON 写回网盘 | 三步上传 `precreate → superfile2/upload → create`(JSON 很小) | ⚠️ 待验证 | 极低 |
+| ③ 改名 | `xpan/file?method=filemanager&opera=rename` | ⚠️ 待验证 | 零 |
 | ④ 本地总表 + 记网盘地址 | 复用现有"旁车 JSON + 素材总表",每条记 `remote_path` + `fs_id` + `md5` | ✅ | 零 |
-| ⑤ 新建文件夹 + 归集视频 | `xpan/file?method=create`(`isdir=1`)+ `filemanager&opera=copy/move` | ✅✅ | **零(服务端操作)** |
+| ⑤ 新建文件夹 + 归集视频 | `xpan/file?method=create`(`isdir=1`)+ `filemanager&opera=copy/move` | ⚠️ 待验证 | **零(服务端操作)** |
 
-> **关键洞察**:第 ⑤ 步"把选中的大视频归集到新文件夹"是网盘**服务端的 copy/move**,纯元数据操作、秒级完成,**完全不经过本地、不受下载限速影响**。整条流程里唯一耗带宽的只有"抽帧理解",而抽帧用 HLS 流只取几张关键帧、不下整片。一个 2GB 视频从扫描到归集,本地几乎不下载它的完整内容。这比"本地打 zip 发剪辑"更优 —— 剪辑同事直接从网盘那个新文件夹转存即可。
+> **读(①②④)= 已可行;写(②写回 / ③改名 / ⑤归集)= 接口存在,但"能写到哪"取决于应用写权限边界,标 ⚠️ 待验证**。个人应用可能被限制在 `/apps/<应用名>/` 目录(见 §7 风险①),因此**写类能力(Phase 2/3)以 Phase 0 实测写权限为前提**;若受限,默认回退到"`/apps` 镜像目录 + 只在总表记建议新名、不动原文件"(见 §7、§10)。
+>
+> **关键洞察(写权限放行后)**:第 ⑤ 步"把选中的大视频归集到新文件夹"是网盘**服务端的 copy/move**,纯元数据操作、秒级完成,**完全不经过本地、不受下载限速影响**。整条流程里唯一耗带宽的只有"抽帧理解",而抽帧用 HLS 流只取几张关键帧、不下整片。一个 2GB 视频从扫描到归集,本地几乎不下载它的完整内容。这比"本地打 zip 发剪辑"更优 —— 剪辑同事直接从网盘那个新文件夹转存即可。
 
 ## 2. 设计原则
 
 - **不为网盘另开一套管线**:复用现有 00–06 + 计划中的 07,新增一层**数据源适配器**(本地 FS ↔ 网盘),与现有"存储适配器"(`adapters/` 飞书/旁车)**正交**。
 - **先只读、后写回**:读建库(列目录+抽帧理解+本地总表)零风险,优先交付;改名/写旁车/归集等**写操作**集中到后续阶段,先验证写权限边界再做(见 §7 风险①)。
 - **不下整片**:视频抽帧走 HLS 流;只有照片这类小文件才整下。
-- **稳定标识用 `fs_id`**:百度 `fs_id` 在改名/移动后不变,作为记录的网盘侧主键;内容去重用 filemetas 返回的 `md5`(免下载即可拿到),替代本地 SHA1 指纹。
+- **`record.id` 仍是内容身份,`fs_id` 只作网盘操作锚点(二者分开,别混)**:
+  - `record.id` 维持现有不变量 —— 内容指纹、manifest 主键、`tmp/<record.id>/frames` 目录锚点。网盘记录**优先用 filemetas 返回的 `md5` 派生** `record.id`(免下载即可拿到),保持与本地 SHA1 同构,跨副本内容去重与帧缓存身份都不破。拿不到 md5 时再降级兜底(如 `fs_id`+size),并标注该条不参与跨副本内容去重。
+  - `fs_id` **仅**用于网盘侧操作(rename/move/copy/collect)——它改名/移动后稳定;但**不要拿它当 `record.id`**,否则同一文件被复制/改名后,内容去重与 `tmp/<id>/frames` 缓存身份会与既有不变量冲突。
 - **凭证当机密对待**:`access_token`/`refresh_token` 存本地、不入库、不进 git(同飞书凭证)。
 
 ## 3. 目标形态
@@ -91,19 +95,21 @@
 |------|------|------|
 | `source` | str? | 数据源:`local`(默认/缺省)/ `baidu` |
 | `remote_path` | str? | 网盘内的当前路径(改名/移动后会变,仅供人读) |
-| `fs_id` | str? | 百度 `fs_id`,**稳定标识**(改名/移动不变),网盘侧主键 |
-| `remote_md5` | str? | filemetas 返回的 md5,免下载去重用 |
+| `fs_id` | str? | 百度 `fs_id`,**网盘操作锚点**(改名/移动不变);**不是** `record.id` |
+| `remote_md5` | str? | filemetas 返回的 md5,**用于派生 `record.id`** + 免下载去重 |
 | `collected_path` | str? | 第 ⑦ 步归集后在网盘新文件夹里的路径 |
 
-> **本地总表"记录网盘地址"= 同时记 `remote_path`(人读)+ `fs_id`(稳定锚)**。路径会因改名/归集变化,`fs_id` 不变,二者并存才能可靠回溯。
+> **本地总表"记录网盘地址"= 同时记 `remote_path`(人读)+ `fs_id`(稳定操作锚)**。路径会因改名/归集变化,`fs_id` 不变,二者并存才能可靠回溯。
+> **`record.id` 不变**:仍是内容身份(网盘记录由 `remote_md5` 派生),与 `fs_id` 解耦,详见 §2 设计原则。
 
 ### 6.2 实现这些字段/能力的 PR 必须同步(缺一即契约破裂)
 
 1. `schema/record.schema.json`:追加上述可选字段。
-2. `lib/record.py`:`Record` 增加对应可选属性(默认 `None`),`id` 去重策略支持"网盘用 `fs_id`/`remote_md5`、本地仍用 SHA1"。
+2. `lib/record.py`:`Record` 增加对应可选属性(默认 `None`)。**`record.id` 维持"内容身份"语义**:网盘记录由 `remote_md5` 派生 `id`(与本地 SHA1 同构),`fs_id` 仅作网盘操作锚点存字段,**不参与 `id`**;拿不到 md5 才降级兜底并标注不参与跨副本去重。
 3. `lib/config.py`:`config.example.yaml` 增加 `source` 段(见 §8),`validate_config` 校验百度凭证缺失时给清晰报错(同飞书)。
-4. 各阶段:`01_scan` 接 `--source`;`02_extract` 视频走 HLS、照片走 dlink;`04_tag_name` 改名调 `source.rename()`;`05_store` 记网盘地址(旁车回传为可选);新增 `07_collect`。
-5. 测试:数据源适配器接口 mock 化(不打真实网盘),覆盖 list 翻页、fs_id 稳定性、rename/collect 调用、token 刷新、限速回退。
+4. **旁车落点(关键)**:`05_store` 的 `SidecarAdapter` 现在把 `.json` 写在 `record.path` 同目录;**网盘记录的 `record.path` 是远端路径,不可写**。因此网盘记录的 Phase 1 旁车**必须落本地** —— 写到 `output_dir`(或本地缓存),**按 `record.id` 命名**(不是远端同目录)。除非文件已在本地物化,否则**绝不**走"与素材同目录"的旁车路径。这需要 `SidecarAdapter` 按 `source` 区分落点(或新增本地缓存旁车模式)。
+5. 各阶段:`01_scan` 接 `--source`;`02_extract` 视频走 HLS、照片走 dlink;`04_tag_name` 改名调 `source.rename()`;`05_store` 按上条落本地旁车 + 总表记网盘地址(回传网盘为 Phase 2 可选);新增 `07_collect`。
+6. 测试:数据源适配器接口 mock 化(不打真实网盘),覆盖 list 翻页、`record.id` 由 md5 派生、`fs_id` 稳定性、本地旁车落点正确(不写远端同目录)、rename/collect 调用、token 刷新、限速回退。
 
 > 本期**不新增 `status` 值**:网盘记录复用现有状态机(`pending/extracted/understood/named/stored/needs_review/failed`)。若实现中发现"转码未就绪需稍后重试"需要表达,优先用 `needs_review` + 原因标志或重试队列,**不轻易新增状态**;若确需新增,按 [PHOTO_PIPELINE.md §4.1](PHOTO_PIPELINE.md) 同样的"全位置同步"清单处理。
 
@@ -142,9 +148,9 @@ source:
 ## 10. 落地顺序(PR 拆分建议)
 
 1. **Phase 0 · 接入与适配器骨架**:注册应用 + 授权拿 token;`BaiduSource` 实现 `list/stat`;`00_detect_env` 探测 token;**实测写权限边界**(产出 go/no-go 结论)。
-2. **Phase 1 · 只读建库**:`01_scan --source baidu` 列网盘 → `02` 视频走 HLS 抽帧/照片 dlink → `03` 理解 → `05` 本地旁车+总表(记 `remote_path`+`fs_id`+`md5`)→ `06` 脚本匹配。**全程不写网盘**,立即可用。
-3. **Phase 2 · 写回网盘**:`04` 改名(filemanager rename)+ 旁车 JSON 回传(`write_back_sidecar`);受 §7 风险① 边界约束。
-4. **Phase 3 · 服务端归集(07_collect)**:按 `06` 匹配结果在网盘新建文件夹 + copy/move 选中素材;支持多份候选包、缺文件报告。这同时补上之前搁置的 `07_collect`(打包给剪辑)需求 —— 网盘版比本地打 zip 更优。
+2. **Phase 1 · 只读建库**:`01_scan --source baidu` 列网盘 → `02` 视频走 HLS 抽帧/照片 dlink → `03` 理解 → `05` **本地旁车(落 `output_dir`,按 `record.id` 命名,不写远端同目录)+ 总表(记 `remote_path`+`fs_id`+`md5`)** → `06` 脚本匹配。**"只读"= 对网盘零写入**(旁车/总表都在本地);立即可用、零写权限风险。
+3. **Phase 2 · 写回网盘(以 Phase 0 写权限实测为前提)**:`04` 改名(filemanager rename)+ 旁车 JSON 回传(`write_back_sidecar`)。**默认回退**:写权限受限时 → 旁车进 `/apps/<应用名>/` 镜像、改名退化为"只在总表记建议新名、不动原文件"(见 §7 风险①)。
+4. **Phase 3 · 服务端归集 07_collect(同以 Phase 0 写权限为前提)**:按 `06` 匹配结果在网盘新建文件夹 + copy/move 选中素材;受限时归集目标落 `/apps/<应用名>/` 下。支持多份候选包、缺文件报告。这同时补上之前搁置的 `07_collect`(打包给剪辑)—— 网盘版比本地打 zip 更优。
 
 每步独立 PR、独立测试;Phase 1 合并后即可"只读建库 + 本地总表记网盘地址",Phase 2/3 再补写回与归集。
 
