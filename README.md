@@ -51,6 +51,18 @@ python scripts/01_scan.py  --input /path/to/media   # 盘点
 # ... 02 → 06 详见 SKILL.md
 ```
 
+### 跨平台说明(含 Windows)
+
+纯 Python(`pathlib` + `subprocess` 调 ffmpeg,无 shell、无 POSIX 专属调用),**macOS / Linux / Windows 通用**。仅安装方式不同:
+
+| 系统 | 安装 ffmpeg | Python 依赖 |
+|------|-------------|-------------|
+| macOS | `brew install ffmpeg` | `pip install -r requirements.txt` |
+| Linux | `apt install ffmpeg` / `dnf install ffmpeg` | 同上 |
+| **Windows** | `winget install ffmpeg`(或 `choco`/`scoop`),确保在 PATH | 建议先 `python -m venv .venv` 再 `pip install -r requirements.txt`(**不需要** `--break-system-packages`) |
+
+Windows 备注:`faster-whisper` 等依赖均有 Windows 轮子,CPU 可跑;文件名已按 Windows 禁用字符清洗;改名优先硬链接,FAT32/exFAT 外接盘自动回退为移动(均不覆盖同名文件)。
+
 ## 协作方式
 
 本仓库由多模型协作开发:架构与高风险逻辑由 Opus 4.8 负责,常规开发由 GPT-5.4(Codex)负责,代码检查见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
