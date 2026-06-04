@@ -95,7 +95,6 @@
 | `group_size` | int? | 本组张数 |
 | `is_junk` | bool? | 是否判为垃圾(截图/翻拍/表情包) |
 | `junk_reason` | str? | 垃圾原因(screenshot/document/meme…) |
-| `content_kind` | str? | 照片子类:照片/截图/文档/表情包(受控小词表) |
 | `live_motion_path` | str? | Live Photo 配对的动态 .mov 路径 |
 | `face_cluster_ids` | str[]? | 命中的人脸簇 ID(Phase 2) |
 

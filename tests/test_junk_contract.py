@@ -28,15 +28,14 @@ def test_junk_and_grouped_status_registered():
 
 def test_triage_fields_roundtrip():
     r = Record(id="x", media_type="photo", original_name="a.jpg", path="/a.jpg",
-               status="junk", content_kind="截图", is_junk=True, junk_reason="screenshot",
+               status="junk", is_junk=True, junk_reason="screenshot",
                group_id="g1", is_representative=False, group_size=3)
     d = r.to_dict()
-    for k in ("content_kind", "is_junk", "junk_reason", "group_id",
+    for k in ("is_junk", "junk_reason", "group_id",
               "is_representative", "group_size"):
         assert k in d
     back = Record.from_dict(d)
     assert back.is_junk is True
-    assert back.content_kind == "截图"
     assert back.group_id == "g1"
     assert back.group_size == 3
 
@@ -62,7 +61,7 @@ def test_store_persists_junk_as_minimal_record(tmp_path, monkeypatch):
     m = Manifest(mpath).load()
     m.upsert(Record(id="junk1", media_type="photo", original_name="shot.png",
                     path=str(media_dir / "shot.png"), status="junk",
-                    is_junk=True, junk_reason="screenshot", content_kind="截图"))
+                    is_junk=True, junk_reason="screenshot"))
     m.upsert(Record(id="good1", media_type="video", original_name="good.mp4",
                     path=str(media_dir / "good.mp4"), status="named",
                     new_name="good", scene=["海边"], subjects=["空镜"]))

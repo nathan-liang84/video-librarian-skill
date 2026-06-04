@@ -42,7 +42,6 @@ class Record:
     live_motion_path: Optional[str] = None
 
     # 照片三检(01b_photo_triage 填;视频/普通照片留默认)
-    content_kind: Optional[str] = None   # 受控:vocab.content_kind(照片/截图/文档/表情包)
     is_junk: Optional[bool] = None       # 是否判为垃圾(截图/翻拍/表情包等)
     junk_reason: Optional[str] = None    # 垃圾原因(screenshot/document/meme…)
     # 近重复/连拍归组:同组共享 group_id;只有代表(is_representative)进精理解
