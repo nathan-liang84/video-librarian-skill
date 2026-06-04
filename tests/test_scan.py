@@ -246,3 +246,88 @@ def test_scan_keeps_png_plus_mov_as_separate_records(tmp_path):
     assert by_name["poster.png"]["live_motion_path"] is None
     assert by_name["poster.mov"]["media_type"] == "video"
     assert by_name["poster.mov"]["status"] == "pending"
+
+
+# ---------- P1b-1: 01_scan 聚合 content_kind ----------
+
+def test_scan_video_only_dir_marks_all_records_video(tmp_path):
+    """P1b-1:目录下只有视频 → 所有记录 content_kind='video'。"""
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "a.mp4").write_bytes(b"video-1")
+    (media_dir / "b.mp4").write_bytes(b"video-2")
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    kinds = {rec["content_kind"] for rec in payload.values()}
+    assert kinds == {"video"}, f"期望全部 video,实得 {kinds}"
+    assert "目录内容类型=video" in result.stdout
+
+
+def test_scan_photo_only_dir_marks_all_records_photo(tmp_path):
+    """P1b-1:目录下只有照片 → 所有记录 content_kind='photo'。"""
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "a.jpg").write_bytes(b"photo-1")
+    (media_dir / "b.jpg").write_bytes(b"photo-2")
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    kinds = {rec["content_kind"] for rec in payload.values()}
+    assert kinds == {"photo"}, f"期望全部 photo,实得 {kinds}"
+    assert "目录内容类型=photo" in result.stdout
+
+
+def test_scan_mixed_dir_marks_all_records_mixed(tmp_path):
+    """P1b-1:目录下视频+照片都有 → 所有记录 content_kind='mixed'。"""
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "v.mp4").write_bytes(b"v")
+    (media_dir / "p.jpg").write_bytes(b"p")
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    kinds = {rec["content_kind"] for rec in payload.values()}
+    assert kinds == {"mixed"}, f"期望全部 mixed,实得 {kinds}"
+    assert "目录内容类型=mixed" in result.stdout
+
+
+def test_scan_live_photo_pair_still_aggregates_mixed(tmp_path):
+    """P1b-1:Live Photo 配对(HEIC + MOV) → 两种 media_type 都有 → mixed。"""
+    scan = _load_scan_module()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "IMG.heic").write_bytes(b"live-still")
+    (media_dir / "IMG.mov").write_bytes(b"live-motion")
+
+    manifest_path = tmp_path / "state" / "manifest.json"
+    import subprocess
+    subprocess.run(
+        [sys.executable, str(Path(scan.__file__)),
+         "--input", str(media_dir), "--manifest", str(manifest_path)],
+        capture_output=True, text=True, check=True, cwd=tmp_path,
+    )
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    kinds = {rec["content_kind"] for rec in payload.values()}
+    assert kinds == {"mixed"}

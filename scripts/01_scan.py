@@ -218,7 +218,8 @@ def pair_live_photos(media: list[tuple[Path, str]]) -> dict[Path, Path]:
 
 def build_record(path: Path, media_type: str, *,
                  live_motion_path: str | None = None,
-                 status: str = "pending", probe: bool = True) -> Record:
+                 status: str = "pending", probe: bool = True,
+                 content_kind: str | None = None) -> Record:
     metadata = {}
     if probe:
         metadata = probe_video(path) if media_type == "video" else probe_photo(path)
@@ -238,6 +239,7 @@ def build_record(path: Path, media_type: str, *,
         shot_at=shot_at,
         gps=metadata.get("gps"),
         device=metadata.get("device"),
+        content_kind=content_kind,
     )
 
 
@@ -269,6 +271,18 @@ def main() -> int:
     motion_to_photo = pair_live_photos(media)
     photo_to_motion = {photo: motion for motion, photo in motion_to_photo.items()}
 
+    # P1b-1:聚合目录下媒体类型 → 写入 content_kind。
+    # 仅 video → "video";仅 photo → "photo";两者都有 → "mixed";空(理论上不会到这里)→ None
+    types_seen = {mt for _, mt in media}
+    if types_seen == {"video"}:
+        content_kind: str | None = "video"
+    elif types_seen == {"photo"}:
+        content_kind = "photo"
+    elif "video" in types_seen and "photo" in types_seen:
+        content_kind = "mixed"
+    else:
+        content_kind = None
+
     # 第二遍:建记录。配对的 .mov → live_motion_skip(不探测元数据);配对的照片 → 记 live_motion_path
     seen_ids = set()
     added = 0
@@ -276,12 +290,14 @@ def main() -> int:
     live_skipped = 0
     for path, media_type in media:
         if path in motion_to_photo:
-            record = build_record(path, media_type, status="live_motion_skip", probe=False)
+            record = build_record(path, media_type, status="live_motion_skip",
+                                  probe=False, content_kind=content_kind)
         elif path in photo_to_motion:
             record = build_record(path, media_type,
-                                  live_motion_path=str(photo_to_motion[path]))
+                                  live_motion_path=str(photo_to_motion[path]),
+                                  content_kind=content_kind)
         else:
-            record = build_record(path, media_type)
+            record = build_record(path, media_type, content_kind=content_kind)
 
         if record.id in seen_ids or manifest.get(record.id) is not None:
             skipped += 1
@@ -297,6 +313,8 @@ def main() -> int:
     msg = f"扫描完成: 新增 {added} 条, 跳过重复 {skipped} 条"
     if live_skipped:
         msg += f", Live Photo 动态分量 {live_skipped} 个(配对后不单独入库)"
+    if content_kind:
+        msg += f", 目录内容类型={content_kind}"
     if junk:
         msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
     print(msg)

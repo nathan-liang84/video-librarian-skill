@@ -174,6 +174,7 @@ video-librarian-skill/
 |------|------|------|------|
 | 识别 | `id` | string | 文件内容指纹(SHA1 前 16 位),去重主键 |
 | 识别 | `media_type` | enum | video / photo |
+| 识别 | `content_kind` | enum | **P1b-1 新增**:目录级内容类型 `video` / `photo` / `mixed`,01_scan 聚合目录下所有媒体类型后写入。仅视频 → video、仅照片 → photo、两者都有 → mixed;旧数据 null 时消费者回退到 `media_type` |
 | 识别 | `original_name` | string | 原始文件名 |
 | 识别 | `new_name` | string | 规范化新文件名(简短) |
 | 识别 | `path` | string | 当前路径 / 云盘相对路径 |
@@ -215,6 +216,7 @@ video-librarian-skill/
 - `mood`:欢快 / 平静 / 温暖 / 紧张 / 悬疑 / 壮阔 / 忧伤 / 治愈 / 高能
 - `scene`:城市 / 自然风光 / 室内 / 街道 / 海边 / 山地 / 美食 / 人物特写 / 交通 / 夜景 / 活动现场
 - `suggested_use`:片头 / 片尾 / 转场 / B-roll / 空镜 / 采访同期 / 氛围铺垫 / 高潮段落
+- `content_kind`(P1b-1):`video` / `photo` / `mixed` —— 目录级内容类型,由 01_scan 聚合推断;消费者可用 `Record.effective_content_kind` 获取(None 时回退 `media_type`)
 
 > 词表可由用户自定义扩展,集中在 vocab.yaml 维护。
 
