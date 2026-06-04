@@ -2,6 +2,7 @@
 PyYAML>=6.0            # 读配置/词表
 Pillow>=10.0           # 缩略图、图片处理
 pillow-heif>=0.16      # HEIC/HEIF 解码(供 lib/imaging.normalize_photo 使用;可选,未装也能跑)
+imagehash>=4.3         # 感知哈希 pHash(供 lib/triage.phash 使用;可选,未装则近重复归组返 None/各成组)
 piexif>=1.1            # 照片 EXIF 读取(或用 exifread)
 openpyxl>=3.1          # 写 Excel 总表
 
