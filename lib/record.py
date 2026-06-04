@@ -16,8 +16,11 @@ from . import SCHEMA_VERSION
 # 任一阶段异常 → failed;低置信/低画质 → needs_review
 # 分支型终态(不进线性进度,后续阶段一律跳过):
 #   live_motion_skip = Live Photo 配对中被抑制的动态 MOV(照片侧已记 live_motion_path)
+#   junk            = 判为垃圾的照片(截图/翻拍/表情包);01b_photo_triage 置入。
+#                     跳过 02/03/04 不烧 API;05 仍存"最小记录"(可后置 audit);
+#                     06 不召回。--include-junk 可让其重新走完整流程。
 STATUSES = ["pending", "extracted", "understood", "named",
-            "stored", "needs_review", "failed", "live_motion_skip"]
+            "stored", "needs_review", "failed", "live_motion_skip", "junk"]
 
 
 @dataclass
@@ -34,6 +37,15 @@ class Record:
     sprite: Optional[str] = None
     # Live Photo:照片记录指向配对的动态 .mov;该 .mov 自身记 status=live_motion_skip
     live_motion_path: Optional[str] = None
+
+    # 照片三检(01b_photo_triage 填;视频/普通照片留默认)
+    content_kind: Optional[str] = None   # 受控:vocab.content_kind(照片/截图/文档/表情包)
+    is_junk: Optional[bool] = None       # 是否判为垃圾(截图/翻拍/表情包等)
+    junk_reason: Optional[str] = None    # 垃圾原因(screenshot/document/meme…)
+    # 近重复/连拍归组:同组共享 group_id;只有代表(is_representative)进精理解
+    group_id: Optional[str] = None
+    is_representative: Optional[bool] = None
+    group_size: Optional[int] = None
 
     # 技术元数据(01_scan / 02_extract 填)
     duration_sec: Optional[float] = None

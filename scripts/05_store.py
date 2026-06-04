@@ -46,7 +46,10 @@ def main() -> int:
 
     # 正常流程入库 status=named;--include-understood 时也纳入未改名的 understood,
     # 但对 understood 先校验受控标签(04 改名阶段本会做),不合规的打回 needs_review。
+    # junk(垃圾照片)默认入库为"最小记录"(无理解结果、无新名),供后置 audit/清理;
+    # 其 is_junk=true 是持久标记,06 据此不召回(状态随后置 stored,保证 05 幂等、不重复入库)。
     wanted = {"named", "understood"} if args.include_understood else {"named"}
+    wanted.add("junk")
     todo = [record for record in manifest.iter_records() if record.status in wanted]
     if args.include_understood:
         vocab = load_vocab()

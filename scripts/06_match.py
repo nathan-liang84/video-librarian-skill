@@ -89,6 +89,11 @@ def _find_sidecar(adapter) -> SidecarAdapter | None:
     return None
 
 
+def _drop_junk(records: list) -> list:
+    """垃圾照片(is_junk)不参与脚本召回 —— 它们以最小记录存档(stored),仅供 audit。"""
+    return [r for r in records if not getattr(r, "is_junk", False)]
+
+
 def _load_library(cfg: dict, manifest_path: Path, scan_roots: list[Path]) -> list:
     """优先从持久库(旁车)读;读不到再退回 manifest 工作状态。"""
     try:
@@ -131,12 +136,15 @@ def main() -> int:
     text = build_text_model(cfg)
 
     scan_roots = [Path(p).resolve() for p in (args.input or [])]
-    library = _load_library(cfg, Path(args.manifest), scan_roots)
+    raw_library = _load_library(cfg, Path(args.manifest), scan_roots)
+    # 垃圾照片(is_junk)虽以最小记录入库存档(stored),但不参与脚本召回。
+    library = _drop_junk(raw_library)
+    junk_n = len(raw_library) - len(library)
     if not library:
         print("素材库为空:请先用 01-05 建库,或用 --input 指向含旁车 .json 的素材目录。")
         return 0
     by_id = {r.id: r for r in library}
-    print(f"素材库:{len(library)} 条。")
+    print(f"素材库:{len(library)} 条。" + (f"(已排除垃圾 {junk_n} 条)" if junk_n else ""))
 
     script_text = Path(args.script).read_text(encoding="utf-8")
     requirements = text.parse_script(script_text, vocab=vocab,
