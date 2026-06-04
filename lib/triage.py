@@ -1,13 +1,17 @@
 """照片分诊(triage)助手(纯函数,可单测)。负责人:Atlas(机械层)。
 
 职责:在调模型之前(成本控制点)做"砍量+归一"决策:
-1. 垃圾启发式:判定 content_kind (照片/截图/文档/表情包) + 可选 junk_reason
+1. 垃圾启发式:判定 junk_reason(screenshot/document/meme;None=保留)
 2. 感知哈希:pHash + 汉明距离,识别"近重复/连拍"
 3. 归组:相似 + 时间近的合并成组、挑选代表
 
+注:本模块**不产出 `content_kind`**。`content_kind` 字段是「目录级媒体类型」
+(video/photo/mixed,由 01_scan 写,见 PR #29);照片是否为垃圾(截图/文档/表情包)
+的结论统一用 ``is_junk`` + ``junk_reason`` 表达,不再占用 content_kind。
+
 设计原则(同 lib/imaging.py):
 - **不依赖项目其它业务对象**:只接 path / dict,与 record/manifest/schema 解耦。
-- **优雅降级,绝不抛**:缺 imagehash / PIL / 文件坏一律返回保守结果(None/原组/"照片")。
+- **优雅降级,绝不抛**:缺 imagehash / PIL / 文件坏一律返回保守结果(None/原组)。
 - **保守**:宁可漏过不可错杀(issue #4 边界);拿不到充分信息时默认判"照片"。
 - **本模块是 P1b 纯函数层**:与集成接缝(单独 issue)严格分离 —— 不读 lib/record、
   不读 lib/manifest、不读 schema,不引入任何新 status/字段。
@@ -60,21 +64,25 @@ def classify_content(
     *,
     resolution: Any = None,
     has_camera_exif: bool | None = None,
-) -> tuple[str, str | None]:
-    """判定 content_kind + 可选 junk_reason。
+) -> str | None:
+    """判定照片是否为垃圾,返回 ``junk_reason``。
 
-    返回 ``(content_kind, junk_reason)``:
-        - content_kind: 严格取 ``{"照片", "截图", "文档", "表情包"}``(对齐 vocab.content_kind)
-        - junk_reason: ``None`` 表示不是垃圾;否则为短码
-          ``"screenshot" / "document" / "meme"``
+    返回 ``junk_reason``:
+        - ``None``  —— 不是垃圾(当作正常照片保留)
+        - 短码字符串 —— 垃圾原因:``"screenshot" / "document" / "meme"``
+          (调用方据此置 ``is_junk=True`` + ``junk_reason=<短码>``)
+
+    本函数**不再返回 content_kind**:照片子类(截图/文档/表情包)不占用 record
+    的 ``content_kind`` 字段(那是 01_scan 的目录级 video/photo/mixed),
+    其信息已由 ``junk_reason`` 完整表达。
 
     启发式(保守,宁可漏过不可错杀):
-        1. 路径含 screenshot / 截屏 / 截图 → ``("截图", "screenshot")``
-        2. 无相机 EXIF 且分辨率命中常见屏幕尺寸 → ``("截图", "screenshot")``
-        3. 无相机 EXIF 且分辨率非典型屏幕 → ``("照片", None)``
+        1. 路径含 screenshot / 截屏 / 截图 → ``"screenshot"``
+        2. 无相机 EXIF 且分辨率命中常见屏幕尺寸 → ``"screenshot"``
+        3. 无相机 EXIF 且分辨率非典型屏幕 → ``None``
            (文档/表情包判定需要读图分析色彩复杂度,超出本纯函数范围,
            issue #4 边界:本函数不读图,留待集成层或后续启发式)
-        4. 拿不到充分信息 → ``("照片", None)``(默认安全)
+        4. 拿不到充分信息 → ``None``(默认安全,保留)
 
     本函数不读图、不依赖 PIL;纯基于 path + 启发式参数。
     """
@@ -88,19 +96,19 @@ def classify_content(
 
     for token in _SCREENSHOT_PATH_TOKENS:
         if token in name or token in full:
-            return ("截图", "screenshot")
+            return "screenshot"
 
     # 2. 屏幕尺寸 + 无 EXIF
     norm_res = _normalize_res(resolution)
     if has_camera_exif is False and norm_res is not None:
         if norm_res in _SCREEN_RESOLUTIONS:
-            return ("截图", "screenshot")
-        # 非典型屏幕分辨率但也无 EXIF:保守判照片(可能是屏幕录像截取/网络下载图,
+            return "screenshot"
+        # 非典型屏幕分辨率但也无 EXIF:保守保留(可能是屏幕录像截取/网络下载图,
         # 留待集成层用更深启发式过滤)
-        return ("照片", None)
+        return None
 
-    # 3/4. 有 EXIF 或无信息 → 默认照片
-    return ("照片", None)
+    # 3/4. 有 EXIF 或无信息 → 保留
+    return None
 
 
 # ---------- 2. 感知哈希 ----------

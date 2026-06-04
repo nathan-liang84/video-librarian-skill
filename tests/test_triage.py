@@ -1,8 +1,8 @@
 """lib.triage 单元测试。负责人:Atlas(机械层)。
 
 覆盖:
-- classify_content:路径关键词 / 屏幕尺寸 / 无 EXIF / 缺信息 / 不读图
-- phash:稳定性 / 差异 / 缺依赖降级 / 坏文件不抛
+- classify_content:路径关键词 / 屏幕尺寸 / 无 EXIF / 缺信息 / 不读图(返回 junk_reason|None)
+- phash:稳定性 / 差异 / 缺依赖降级 / 坏文件不抛(需 imagehash 的用例自动 skip)
 - hamming:相同 / 异或 / 非法输入大数 / 长度不等
 - group_near_duplicates:相似+时间近 / 时间远不合 / phash=None 各成组 / 单项成 1-组
 - pick_representative:分辨率优先 / has_exif 决胜 / 空列表
@@ -60,49 +60,47 @@ def _make_pattern_jpeg(path: Path, color: str, *, size: int = 128) -> None:
 # ============================================================
 
 def test_classify_photo_by_default():
-    """无信息 → 默认照片(保守)。"""
-    assert triage.classify_content("/x/y.jpg") == ("照片", None)
-    assert triage.classify_content(None) == ("照片", None)
+    """无信息 → 默认保留(非垃圾 → junk_reason=None)。"""
+    assert triage.classify_content("/x/y.jpg") is None
+    assert triage.classify_content(None) is None
 
 
 def test_classify_screenshot_by_path_token():
-    """路径含 Screenshot/截屏 → 截图(强信号,不依赖 EXIF)。"""
+    """路径含 Screenshot/截屏 → screenshot(强信号,不依赖 EXIF)。"""
     cases = [
         "/Users/nate/Pictures/Screenshot 2026-01-01 at 10.00.00.png",
         "/sdcard/截屏/屏幕截图.png",
         "/photos/screen shot.png",
     ]
     for p in cases:
-        kind, reason = triage.classify_content(p)
-        assert kind == "截图", f"path={p!r} got kind={kind}"
-        assert reason == "screenshot"
+        assert triage.classify_content(p) == "screenshot", f"path={p!r}"
 
 
 def test_classify_screenshot_by_screen_resolution_no_exif():
-    """无 EXIF + 屏幕尺寸 → 截图。"""
+    """无 EXIF + 屏幕尺寸 → screenshot。"""
     assert triage.classify_content("/x/y.png", resolution=(1170, 2532),
-                                   has_camera_exif=False) == ("截图", "screenshot")
+                                   has_camera_exif=False) == "screenshot"
     # 字符串分辨率格式也认
     assert triage.classify_content("/x/y.png", resolution="1920x1080",
-                                   has_camera_exif=False) == ("截图", "screenshot")
+                                   has_camera_exif=False) == "screenshot"
 
 
 def test_classify_photo_when_exif_present():
     """有 EXIF → 永远不判截图(即便是屏幕尺寸,可能是真人拍屏幕照片)。"""
     assert triage.classify_content("/x/y.png", resolution=(1920, 1080),
-                                   has_camera_exif=True) == ("照片", None)
+                                   has_camera_exif=True) is None
 
 
 def test_classify_photo_when_exif_unknown_even_screen_size():
-    """EXIF 信息未知(None)+ 屏幕尺寸 → 保守判照片(宁可漏过不可错杀)。"""
+    """EXIF 信息未知(None)+ 屏幕尺寸 → 保守保留(宁可漏过不可错杀)。"""
     assert triage.classify_content("/x/y.png", resolution=(1920, 1080),
-                                   has_camera_exif=None) == ("照片", None)
+                                   has_camera_exif=None) is None
 
 
 def test_classify_photo_when_non_typical_resolution_no_exif():
-    """无 EXIF 但分辨率非典型屏幕 → 判照片(留待更深启发式)。"""
+    """无 EXIF 但分辨率非典型屏幕 → 保留(留待更深启发式)。"""
     assert triage.classify_content("/x/y.png", resolution=(4000, 3000),
-                                   has_camera_exif=False) == ("照片", None)
+                                   has_camera_exif=False) is None
 
 
 def test_classify_does_not_read_image():
@@ -110,15 +108,15 @@ def test_classify_does_not_read_image():
     # 传一个不存在的路径,不应该抛
     out = triage.classify_content("/no/such/file.jpg", resolution=(1920, 1080),
                                   has_camera_exif=False)
-    assert out == ("截图", "screenshot")
+    assert out == "screenshot"
 
 
 def test_classify_garbage_resolution_safe():
-    """非数字分辨率/奇怪输入 → 不抛,降级。"""
+    """非数字分辨率/奇怪输入 → 不抛,降级保留。"""
     assert triage.classify_content("/x.png", resolution="abc",
-                                   has_camera_exif=False) == ("照片", None)
+                                   has_camera_exif=False) is None
     assert triage.classify_content("/x.png", resolution=(None, 100),
-                                   has_camera_exif=False) == ("照片", None)
+                                   has_camera_exif=False) is None
 
 
 # ============================================================
@@ -126,6 +124,7 @@ def test_classify_garbage_resolution_safe():
 # ============================================================
 
 def test_phash_stable_for_same_image(tmp_path: Path):
+    pytest.importorskip("imagehash")  # 可选依赖;未装时 phash 降级返 None,本断言不适用
     p = tmp_path / "red.jpg"
     _make_jpeg(p, color="red")
     h1 = triage.phash(p)
@@ -145,6 +144,7 @@ def test_phash_differs_for_different_images(tmp_path: Path):
     这是 imagehash 库的设计,不是本函数 bug。
     本测试用几何位置不同的两个方块,保证 pHash 区分。
     """
+    pytest.importorskip("imagehash")  # 可选依赖;未装时 phash 降级返 None,本断言不适用
     a = tmp_path / "a.jpg"
     b = tmp_path / "b.jpg"
     a.parent.mkdir(parents=True, exist_ok=True)
