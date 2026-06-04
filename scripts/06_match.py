@@ -89,6 +89,17 @@ def _find_sidecar(adapter) -> SidecarAdapter | None:
     return None
 
 
+def _recallable(records: list) -> list:
+    """筛出可参与脚本召回的记录,排除两类"存档但不召回"的:
+    - 垃圾照片(is_junk=True);
+    - 近重复/连拍的【非代表】成员(is_representative is False)——代表已在库,
+      成员经 group_id 可发现,不必在匹配池里重复出现。
+    代表(True)与独立项(None)均保留。"""
+    return [r for r in records
+            if not getattr(r, "is_junk", False)
+            and getattr(r, "is_representative", None) is not False]
+
+
 def _load_library(cfg: dict, manifest_path: Path, scan_roots: list[Path]) -> list:
     """优先从持久库(旁车)读;读不到再退回 manifest 工作状态。"""
     try:
@@ -131,12 +142,16 @@ def main() -> int:
     text = build_text_model(cfg)
 
     scan_roots = [Path(p).resolve() for p in (args.input or [])]
-    library = _load_library(cfg, Path(args.manifest), scan_roots)
+    raw_library = _load_library(cfg, Path(args.manifest), scan_roots)
+    # 垃圾照片 / 近重复非代表成员虽以最小记录入库存档(stored),但不参与脚本召回。
+    library = _recallable(raw_library)
+    excluded_n = len(raw_library) - len(library)
     if not library:
         print("素材库为空:请先用 01-05 建库,或用 --input 指向含旁车 .json 的素材目录。")
         return 0
     by_id = {r.id: r for r in library}
-    print(f"素材库:{len(library)} 条。")
+    print(f"素材库:{len(library)} 条。"
+          + (f"(已排除垃圾/近重复成员 {excluded_n} 条)" if excluded_n else ""))
 
     script_text = Path(args.script).read_text(encoding="utf-8")
     requirements = text.parse_script(script_text, vocab=vocab,

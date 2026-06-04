@@ -324,7 +324,9 @@ video-librarian-skill/
 剪辑素材视角的照片专项能力,分两阶段并入本仓库:
 
 - **Phase 1(轻量,立即见效)**:HEIC 格式兼容 + EXIF 旋正 + Live Photo 配对 + 垃圾过滤(截图/翻拍/表情包)+ 近重复/连拍归组(pHash)。  
-  关键设计:垃圾记录进 `status=junk`——跳过 02/03/04 不烧钱,仍以最小 record 存入库(可后置 audit);`--include-junk` 供误判时重跑。
+  关键设计(分支终态,详见 [docs/PHOTO_PIPELINE.md](docs/PHOTO_PIPELINE.md) §4.1):
+  - 垃圾记录 `status=junk`——跳过 02/03/04 不烧钱,以最小 record 入库(`is_junk=true` 持久标记);06 不召回;`--include-junk` 误判时重跑。
+  - 近重复/连拍**非代表成员** `status=grouped`——代表正常精理解,成员跳过 02/03/04、以最小 record 入库(`is_representative=false`+`group_id`);06 不直接召回,经 `group_id` 可从代表展开发现。
 - **Phase 2(可选,需安装本地模型)**:InsightFace(ArcFace) 本地人脸聚类 + M3 贴标签 → 回填 `subjects` 与名册;人脸数据只存本地。  
   挂载点:管线 `01b` 之后新增 `face_cluster` pass(`state/faces.db` 预留);Phase 1 合并后可独立安装。
 

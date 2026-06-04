@@ -36,7 +36,7 @@
 
 - **Live Photo 配对在 `01_scan` 阶段完成**:现有 `01_scan` 会为 `.mov` 创建 `media_type=video` 记录。P1a 在 scan 时检测同 stem 的 HEIC+MOV,立即将 MOV 记录状态设为 `live_motion_skip`,并在照片记录上写入 `live_motion_path`。此后 02/03/04/05/06 均跳过 `live_motion_skip` 记录,照片记录携带 `live_motion_path` 即可。
 - `01b` 因此只需处理 `media_type=photo` 的记录:Live Photo MOV 已在 scan 时隔离,普通视频记录不受影响、原样流向后续阶段。
-- 代表帧之外的近重复成员:不调模型,记 `group_id` 指向代表,仍可被检索召回。
+- 代表帧之外的近重复成员:不调模型,`status=grouped` + `group_id` 指向代表;以最小记录入库,**06 不直接召回**(避免近重复刷屏),但经 `group_id` 可从代表展开发现。
 
 ## 3. 分阶段落地
 
@@ -71,8 +71,8 @@
   > 这样垃圾记录**默认仍入库**(`05_store` 存最小信息,可后置 audit/清理),同时**默认跳过理解**(不烧 API);`--include-junk` 是"我想重新跑这批"的恢复开关。两处描述不再矛盾。
 - 近重复/连拍归组:
   - 感知哈希(`imagehash` 的 pHash/dHash)+ 拍摄时间窗 → 汉明距离 < 阈值且时间相近 → 同组。
-  - 每组选 1 张代表(质量最高/最清晰),`is_representative=true`;其余 `is_representative=false` + `group_id`。
-  - 只有代表进 `02/03`;成员共享代表的理解结果或仅保留指针。
+  - 每组选 1 张代表(质量最高/最清晰),`is_representative=true`,**留 `status=pending` 正常精理解**;其余 `is_representative=false` + `group_id` + **`status=grouped`**。
+  - 只有代表进 `02/03`;成员(`grouped`)跳过 02/03/04,05 存最小记录,06 不直接召回(经 `group_id` 可发现),不烧 API。
 - **成本效果**:几百上千张连拍相册,模型调用量可能压到 1/5–1/10。
 
 ### Phase 2 — 自动人脸聚类(最重,单独 PR,可选装)
@@ -95,30 +95,31 @@
 | `group_size` | int? | 本组张数 |
 | `is_junk` | bool? | 是否判为垃圾(截图/翻拍/表情包) |
 | `junk_reason` | str? | 垃圾原因(screenshot/document/meme…) |
-| `content_kind` | str? | 照片子类:照片/截图/文档/表情包(受控小词表) |
 | `live_motion_path` | str? | Live Photo 配对的动态 .mov 路径 |
 | `face_cluster_ids` | str[]? | 命中的人脸簇 ID(Phase 2) |
 
 ## 4.1 状态契约增量(实现 PR 必须同步)
 
-本计划新增两个**分支型终态**(不进入 `pending→extracted→understood→named→stored` 线性进度,而是"到此为止/此后全跳"):
+本计划新增三个**分支型终态**(不进入 `pending→extracted→understood→named→stored` 线性进度,而是"到此为止/此后全跳"):
 
 | 新状态 | 含义 | 由谁置入 | 终点行为 |
 |--------|------|---------|---------|
-| `junk` | 判为垃圾的照片 | `01b_photo_triage` | 跳过 02/03/04;`05_store` 存最小 record;`06_match` 不召回。`--include-junk` 可恢复重跑 |
-| `live_motion_skip` | Live Photo 配对中被抑制的动态 MOV | `01_scan`(P1a) | 02/03/04/05/06 一律跳过、不召回 |
+| `live_motion_skip` | Live Photo 配对中被抑制的动态 MOV | `01_scan`(P1a,已落地) | 02/03/04/05/06 一律跳过、不召回 |
+| `junk` | 判为垃圾的照片 | `01b_photo_triage` | 跳过 02/03/04;`05_store` 存最小 record(→`stored`,`is_junk=true` 持久);`06_match` 不召回(按 `is_junk` 排除)。`--include-junk` 可恢复重跑 |
+| `grouped` | 近重复/连拍组的**非代表成员** | `01b_photo_triage` | 代表留 `pending` 正常精理解;成员跳过 02/03/04;`05_store` 存最小 record(→`stored`,`is_representative=false`+`group_id` 持久);`06_match` 不直接召回(按 `is_representative is False` 排除),经 `group_id` 可发现 |
 
-> 现有合法状态见 `lib/record.STATUSES`(`pending/extracted/understood/named/stored/needs_review/failed`),线性进度见 `lib/manifest.PROGRESS`。**没有 `scanned`**:扫描后的初始状态是 `pending`。
+> 现有合法状态见 `lib/record.STATUSES`(`pending/extracted/understood/named/stored/needs_review/failed` + 上述三个),线性进度见 `lib/manifest.PROGRESS`。**没有 `scanned`**:扫描后的初始状态是 `pending`。
+> 注:`junk`/`grouped` 记录经 `05_store` 入库后状态会推进到 `stored`,**`is_junk` / `is_representative=False` 才是 06 排除召回的持久标记**(状态推进保证 05 幂等)。
 
-**实现这两个状态的 PR 必须在同一改动里同步以下位置(缺一即契约破裂):**
+**实现这些状态的 PR 必须在同一改动里同步以下位置(缺一即契约破裂):**
 
-1. `lib/record.py` 的 `STATUSES` 追加 `junk` / `live_motion_skip`。
-2. `lib/manifest.py` 的 `PROGRESS`:**不要**把它们加进线性进度(它们是分支终态);若 `progress_index` 等比较逻辑会被 -1 影响,需显式处理(终态视为"已完成,不再推进")。
-3. `schema/record.schema.json` 的 `status` 枚举追加这两个值。
-4. 各阶段取件过滤:`02_extract` / `03_understand` / `04_tag_name` 的 `status in {...}` 白名单显式排除这两个状态;`05_store` 对 `junk` 走"最小 record 入库"、对 `live_motion_skip` 跳过;`06_match` 硬过滤掉 `is_junk=true` 与 `live_motion_skip`。
-5. 测试:新增对应单测(junk 流转、live_motion_skip 全程跳过、`--include-junk` 恢复)。
+1. `lib/record.py` 的 `STATUSES` 追加对应状态(`live_motion_skip` 已加;`junk`/`grouped` 见 P1b-A)。
+2. `lib/manifest.py` 的 `PROGRESS`:**不要**把它们加进线性进度(它们是分支终态);不在 `PROGRESS` 内的状态 `_rank` 返回 -1、`has_done` 恒 False,各阶段按精确 status 取件即天然排除。
+3. `schema/record.schema.json` 的 `status` 枚举追加。
+4. 各阶段取件过滤:`02/03/04` 按上一阶段精确 status 取件 → 三个终态天然跳过;`05_store` 对 `junk`/`grouped` 走"最小 record 入库"(→stored)、对 `live_motion_skip` 跳过;`06_match` 用 `_recallable` 排除 `is_junk=true` 与 `is_representative is False`(`live_motion_skip` 不在 `LIBRARY_STATUSES` 故天然不入)。
+5. 测试:junk/grouped 流转与最小入库、06 排除、live_motion_skip 全程跳过、`--include-junk` 恢复。
 
-> 若实现时决定**不新增**状态(例如用既有 `failed`/复用 `needs_review` + 标志位表达),也须在该 PR 的描述里写明取舍,并保证上述各阶段过滤一致;但本计划推荐用上面两个语义明确的新状态,避免与"失败/待复核"混淆。
+> `junk`/`grouped` 的契约(状态 + 字段 + 05/06 处理)已在 **P1b-A** 落地;01b 集成只需按此置字段/状态,无需改 02-06 取件。
 
 ## 5. 依赖
 
