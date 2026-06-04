@@ -15,7 +15,7 @@
     "live_motion_path": { "type": ["string", "null"], "description": "Live Photo 配对的动态 .mov 路径;该 .mov 自身记 status=live_motion_skip" },
 
     "content_kind": { "type": ["string", "null"], "enum": ["照片", "截图", "文档", "表情包", null], "description": "受控:vocab.content_kind,照片子类(01b_photo_triage 判定)" },
-    "is_junk": { "type": ["boolean", "null"], "description": "是否判为垃圾(截图/翻拍/表情包等);为 true 的记录 status=junk" },
+    "is_junk": { "type": ["boolean", "null"], "description": "是否判为垃圾(截图/翻拍/表情包等)。01b 置 status=junk;经 05_store 入库后可能为 status=stored 且 is_junk=true —— is_junk 是 06 排除召回的持久标记" },
     "junk_reason": { "type": ["string", "null"], "description": "垃圾原因(screenshot/document/meme…)" },
     "group_id": { "type": ["string", "null"], "description": "近重复/连拍组 ID(同组共享);仅代表帧进精理解" },
     "is_representative": { "type": ["boolean", "null"], "description": "是否本组代表(只有代表进 02/03 精理解)" },
