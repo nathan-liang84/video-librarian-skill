@@ -66,7 +66,7 @@
   1. 在目标 issue 下评论一句「<名字> 认领」(留痕,避免撞车);
   2. 从最新 `main` 开分支(`feat/...`),**只动 issue 列出的文件**;
   3. `pytest -q` 全绿后提 PR,描述写 `Closes #<编号>`(合并即自动关 issue)。
-- **铁律:不自审、不自合**。作者 ≠ 审查者(见上"评审第一原则")。Atlas 写的 → Opus/GPT-5.5 复审;Codex 写的 → Opus 终审高风险 + GPT-5.5;Opus 写的 → GPT-5.5 复审。
+- **铁律:不自审;审查通过即自动合并**。评审必须他人完成(作者 ≠ 审查者,见上"评审第一原则")。审查方判定通过后**直接 `gh pr merge`,不回到用户手动合并**;作者不得在无他方通过时合并自己的 PR。Atlas 写的 → Opus/GPT-5.5 复审;Codex 写的 → Opus 终审高风险 + GPT-5.5;Opus 写的 → GPT-5.5 复审。
 - 查"现在谁能干什么":`gh issue list --label claimable` / `gh issue list --label agent:atlas`。
 
 ## 给 Codex 的"即可开工"清单(建议顺序)
