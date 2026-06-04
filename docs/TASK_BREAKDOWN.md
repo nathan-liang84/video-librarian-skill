@@ -70,7 +70,7 @@
 
 - **飞书自建应用**:`app_id/app_secret`,开通权限 `bitable:app`、`bitable:record`、附件上传(drive:file 相关);建好多维表格拿 `app_token`、`table_id`。
 - **MiniMax**:M3 与 M2.7 的 API key;**确认 Token Plan 订阅是否适用于 API 批处理**(影响成本量级)。
-- **人物参考图**:主角(寸寸)1–2 张放 `config/refs/`(已 gitignore)。
+- **人物参考图**:主角(主角)1–2 张放 `config/refs/`(已 gitignore)。
 - **ffmpeg/ffprobe**:运行机器安装到位。
 
 ## 里程碑(对应 PRD §9)
