@@ -22,7 +22,7 @@ def test_load_records_dedup_prefers_current_sidecar():
     不让重复候选进入排序 / 总表。"""
     T = Path(tempfile.mkdtemp())
     try:
-        media = T / "20260603_寸寸_健身房_01.mp4"
+        media = T / "20260603_Alice_健身房_01.mp4"
         media.write_text("video")
         # 当前旁车:与媒体同 stem、媒体存在、时间较新 → 应胜出
         cur = Record(id="dup1", media_type="video", original_name="raw.mp4",

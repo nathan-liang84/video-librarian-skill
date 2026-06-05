@@ -20,20 +20,20 @@ def _rec(rid, subjects, scene=None):
 
 
 def test_atoms_splits_composite():
-    assert match._atoms(["寸寸和男朋友"]) == {"寸寸", "男朋友"}
-    assert match._atoms(["寸寸", "宠物狗"]) == {"寸寸", "宠物狗"}
+    assert match._atoms(["Alice和男朋友"]) == {"Alice", "男朋友"}
+    assert match._atoms(["Alice", "宠物狗"]) == {"Alice", "宠物狗"}
     assert match._atoms(["空镜"]) == {"空镜"}
     assert match._atoms([]) == set()
 
 
 def test_composite_subject_matches_requirement():
     recs = [
-        _rec("a", ["寸寸和男朋友"]),     # 组合,应被"寸寸"命中
-        _rec("b", ["寸寸"]),
-        _rec("c", ["多人"]),             # 不应被"寸寸"命中
+        _rec("a", ["Alice和男朋友"]),     # 组合,应被"Alice"命中
+        _rec("b", ["Alice"]),
+        _rec("c", ["多人"]),             # 不应被"Alice"命中
         _rec("d", ["空镜"]),
     ]
-    req = {"subjects": ["寸寸"]}
+    req = {"subjects": ["Alice"]}
     got = {r.id for r in match._hard_filter(req, recs, use_shot=True, use_subj=True)}
     assert got == {"a", "b"}, got
 
@@ -46,11 +46,11 @@ def test_empty_subject_requirement_keeps_all():
 
 
 def test_fallback_relaxes_subjects_when_scene_matches():
-    """镜头人物解析过严(寸寸)但场景对(健身房),应放宽人物后命中 多人 素材。"""
+    """镜头人物解析过严(Alice)但场景对(健身房),应放宽人物后命中 多人 素材。"""
     recs = [_rec("gym", ["多人"], scene=["健身房"]),
-            _rec("mall", ["寸寸"], scene=["商场"])]
-    req = {"scene": ["健身房"], "subjects": ["寸寸"]}
-    # 精确档:寸寸 ∩ 多人 = 空 → 0 命中
+            _rec("mall", ["Alice"], scene=["商场"])]
+    req = {"scene": ["健身房"], "subjects": ["Alice"]}
+    # 精确档:Alice ∩ 多人 = 空 → 0 命中
     assert match._hard_filter(req, recs, use_shot=True, use_subj=True) == []
     # 渐进放宽:放掉人物后,靠 健身房 场景锚定命中 gym
     cands, note = match._filter_with_fallback(req, recs)

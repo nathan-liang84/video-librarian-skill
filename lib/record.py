@@ -48,7 +48,7 @@ class Record:
 
     # 数据源(网盘 Phase 1):本地记录留默认(source=None ⇒ 视作 "local")。
     # record.id 仍是内容身份(网盘记录由 remote_md5 派生);fs_id 仅网盘操作锚点,不入 id。
-    # 详见 docs/NETDISK_PIPELINE.md §2/§6。字段改动属章程 §8 契约红线,必走 Opus 评审。
+    # 这些为前向兼容的可空字段;本地记录恒为 None。
     source: Optional[str] = None          # "local"(默认/缺省) | "baidu"
     remote_path: Optional[str] = None     # 网盘内当前路径(人读;改名/归集后会变)
     fs_id: Optional[str] = None           # 网盘操作锚点(rename/move/copy);不是 record.id

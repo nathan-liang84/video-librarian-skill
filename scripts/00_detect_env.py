@@ -46,6 +46,15 @@ def check_python_dep(mod: str, pip_name: str | None = None) -> bool:
     return ok
 
 
+def _module_available(mod: str) -> bool:
+    """静默探测可选模块是否可 import(用于非致命的可选能力检查)。"""
+    try:
+        __import__(mod)
+        return True
+    except ImportError:
+        return False
+
+
 def main() -> int:
     print("== 系统工具 ==")
     bins = [
@@ -58,9 +67,12 @@ def main() -> int:
         check_python_dep("PIL", "Pillow"),
         check_python_dep("openpyxl"),
         check_python_dep("requests"),
-        check_python_dep("faster_whisper", "faster-whisper"),
     ]
-    print("== 照片格式 ==")
+    print("== 可选能力(缺失不影响核心流程)==")
+    asr_ok = _module_available("faster_whisper")
+    print(f"  [{'✓' if asr_ok else '○'}] 语音转写 (faster-whisper)"
+          + ("" if asr_ok else "  → pip install faster-whisper"
+                                "(可选;缺则跳过语音转写,视频仍抽帧理解,照片不受影响)"))
     heif_ok = heif_available()
     print(f"  [{'✓' if heif_ok else '✗'}] HEIC/HEIF 解码 (pillow-heif)"
           + ("" if heif_ok else "  → pip install pillow-heif"

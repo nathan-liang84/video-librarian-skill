@@ -1,8 +1,10 @@
 # VideoLibrarian — 视频/照片素材智能整理 Skill
 
+[![tests](https://github.com/nathan-liang84/video-librarian-skill/actions/workflows/tests.yml/badge.svg)](https://github.com/nathan-liang84/video-librarian-skill/actions/workflows/tests.yml)
+
 一套**跨 Agent 平台通用的 Skill**(OpenClaw / Codex / Claude Code 均可调用):自动"读懂"大量视频与照片素材 → 总结 + 打标签 + 规范命名 → 汇总成可检索的素材总表 → 按剪辑脚本快速匹配可用素材。
 
-> 设计文档见 [PRD.md](PRD.md)。任务拆解与协作分工见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
+> 设计文档见 [PRD.md](PRD.md)。
 
 ## 它解决什么
 
@@ -43,7 +45,7 @@ video-librarian-skill/
 └── state/               # 运行状态(manifest / rename_log,默认 gitignore)
 ```
 
-## 快速开始(开发中)
+## 快速开始
 
 ```bash
 pip install -r requirements.txt
@@ -65,9 +67,9 @@ python scripts/01_scan.py  --input /path/to/media   # 盘点
 
 Windows 备注:`faster-whisper` 等依赖均有 Windows 轮子,CPU 可跑;文件名已按 Windows 禁用字符清洗;改名优先硬链接,FAT32/exFAT 外接盘自动回退为移动(均不覆盖同名文件)。
 
-## 协作方式
+## 贡献
 
-本仓库由多模型协作开发:架构与高风险逻辑由 Opus 4.8 负责,常规开发由 GPT-5.4(Codex)负责,代码检查见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
+欢迎 issue 与 PR。改动若涉及 `schema/record.schema.json` 或受控词表 `config/vocab.yaml`,请在 PR 中说明对各阶段契约的影响。
 
 ## License
 
