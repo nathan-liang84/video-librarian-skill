@@ -59,10 +59,20 @@ jobs:
               continue
             fi
 
+            # gh pr review 不支持 --event;要用具体 flag
+            case "$EVENT" in
+              APPROVE)          FLAG="--approve" ;;
+              REQUEST_CHANGES)  FLAG="--request-changes" ;;
+              COMMENT)          FLAG="--comment" ;;
+              *)
+                echo "::error::未知 event 值:$EVENT(允许 APPROVE/REQUEST_CHANGES/COMMENT)"
+                FAILED=1; continue ;;
+            esac
+
             echo "→ 发 $EVENT review on PR #$PR (head $SHA)"
             gh pr review "$PR" \
               --repo "$GITHUB_REPOSITORY" \
-              --event "$EVENT" \
+              "$FLAG" \
               --body "$BODY"
 
             echo "✓ PR #$PR review 已发"
