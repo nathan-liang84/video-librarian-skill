@@ -3,6 +3,12 @@ config/config.yaml
 config/config.*.local.yaml
 .env
 
+# 凭证 / 密钥兜底(实际凭证存仓库外 ~/.config/video-librarian/)
+*credential*
+*secret*
+*_token*
+*.key
+
 # 运行状态
 state/*
 !state/.gitkeep
