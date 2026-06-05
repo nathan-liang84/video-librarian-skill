@@ -14,8 +14,13 @@
 | 写:**普通目录**建文件夹 | ✅ `errno=0` | Phase 3 归集可建在**任意目录**,非 `/apps` 沙箱 |
 | 写:改名(`filemanager rename`) | ✅ `errno=0` | Phase 2 **可直接改原文件名** |
 | 写:小文件三步上传 | ✅ `precreate→superfile2→create` 全通 | Phase 2 **旁车 JSON 可回传网盘** |
+| 写:**跨目录** copy(`filemanager&opera=copy`) | ✅ `errno=0`(2026-06-05 补测) | Phase 3 归集**服务端跨目录复制可行** |
+| 写:**跨目录** move(`filemanager&opera=move`) | ✅ `errno=0`(2026-06-05 补测) | Phase 3 归集亦可用移动 |
+| 读:视频 `streaming`(M3U8) | ✅ 已转码视频 HTTP 200 直返 `#EXTM3U` 文本 | Phase 1 抽帧走 HLS 可行(未转码走 31341 退避/封面兜底) |
 | 删除清理 | ✅ 探测文件夹已删,账号无残留 | — |
 | 账号等级 | **SVIP** | dlink 不限速,§7 风险③ 基本解除 |
+
+> 备注:copy/move 的**配额上限、未转码视频转码就绪率**等规模化行为仍待 Phase 1/3 真机标定;接口路径本身(建夹/改名/上传/copy/move/streaming)均已实测连通。
 
 > **结论:写权限边界(§7 风险①,原最高优先级 go/no-go)落在普通目录可读可写可改名——完全放行,Phase 2/3 无需 `/apps` 镜像降级。** 凭证存本地仓库外 `~/.config/video-librarian/baidu_credentials.json`(600),不入库、不进 git。
 
@@ -44,7 +49,7 @@
 | ② JSON 写回网盘 | 三步上传 `precreate → superfile2/upload → create`(JSON 很小) | ✅ 实测通过 | 极低 |
 | ③ 改名 | `xpan/file?method=filemanager&opera=rename` | ✅ 实测通过 | 零 |
 | ④ 本地总表 + 记网盘地址 | 复用现有"旁车 JSON + 素材总表",每条记 `remote_path` + `fs_id` + `md5` | ✅ | 零 |
-| ⑤ 新建文件夹 + 归集视频 | `xpan/file?method=create`(`isdir=1`)+ `filemanager&opera=copy/move` | ✅ 实测通过(建夹/改名/上传) | **零(服务端操作)** |
+| ⑤ 新建文件夹 + 归集视频 | `xpan/file?method=create`(`isdir=1`)+ `filemanager&opera=copy/move` | ✅ 实测通过(建夹 + **跨目录 copy/move** 均 errno=0) | **零(服务端操作)** |
 
 > **读写均已 Phase 0 实测通过(2026-06-05,见 §0.2)**:写操作在**普通目录**成功(建文件夹/改名/小文件上传),**未被限制到 `/apps/<应用名>/` 沙箱**。因此 Phase 2/3 直接对原文件操作,**`/apps` 镜像降级方案不再需要**(保留在 §7 仅作历史记录)。
 >
@@ -164,7 +169,7 @@ source:
 
 ## 10. 落地顺序(PR 拆分建议)
 
-0. **Phase 0 · 接入与边界实测** —— ✅ **已完成(2026-06-05,见 §0.2)**:应用注册 + 设备码授权拿 token;读(list/uinfo/quota)与写(建夹/改名/上传/删除)在普通目录全部实测通过;写权限 go/no-go = **GO**。
+0. **Phase 0 · 接入与边界实测** —— ✅ **已完成(2026-06-05,见 §0.2)**:应用注册 + 设备码授权拿 token;读(list/uinfo/quota/streaming)与写(建夹/改名/上传/删除 + **跨目录 copy/move**)在普通目录全部实测通过;写权限 go/no-go = **GO**。**copy/move 跨目录已实测连通**,Phase 3 据此推进;惟配额上限/未转码视频比例等规模化行为留 Phase 1/3 真机标定,`07_collect` 仍保留缺文件报告与本地下发兜底。
 1. **Phase 1 · 只读建库**(进行中):`01_scan --source baidu` 列网盘 → `02` 视频走 HLS 抽帧/照片 dlink → `03` 理解 → `05` **本地旁车(落 `output_dir`,按 `record.id` 命名,不写远端同目录)+ 总表(记 `remote_path`+`fs_id`+`md5`)** → `06` 脚本匹配。**"只读"= 对网盘零写入**(旁车/总表都在本地);立即可用、零风险。拆分见 §12。
 2. **Phase 2 · 写回网盘**:`04` 改名(filemanager rename)+ 旁车 JSON 回传(`write_back_sidecar`)。Phase 0 已确认写权限,**直接对原文件操作**,无需镜像降级。
 3. **Phase 3 · 服务端归集 07_collect**:按 `06` 匹配结果在网盘新建文件夹 + copy/move 选中素材(任意目录)。支持多份候选包、缺文件报告。补上搁置的 `07_collect`(打包给剪辑)—— 网盘版服务端 move 零带宽,优于本地打 zip。
@@ -187,8 +192,9 @@ source:
 
 ## 11. 待定 / 风险清单(实现前需真机验证)
 
-- ~~写权限边界(`/apps/` 限制是否生效)~~ —— ✅ **已实测解除(§0.2):普通目录可读可写可改名,无 `/apps` 限制。**
-- streaming 转码就绪率与抽帧质量(真实素材标定)——Phase 1 P1-N4 真机标定。
+- ~~写权限边界(`/apps/` 限制是否生效)~~ —— ✅ **已实测解除(§0.2):普通目录可读可写可改名,跨目录 copy/move 亦 errno=0,无 `/apps` 限制。**
+- copy/move 的**配额上限 / 大批量行为**(接口路径已实测,规模化未压测)——Phase 3 `07_collect` 上线前标定,保留缺文件报告 + 本地下发兜底。
+- streaming 转码就绪率与抽帧质量(已转码视频直返 #EXTM3U;未转码 31341 比例需真实素材标定)——Phase 1 P1-N4。
 - list 大目录的翻页/限频表现与断点续跑配合。
 - `fs_id` 在改名+归集后的稳定性(理论稳定,需实测确认)。
 - 多账号/多 token 场景(暂不支持,单账号优先)。
