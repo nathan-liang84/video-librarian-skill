@@ -140,6 +140,28 @@ def probe_baidu_token(cred_path: str | Path) -> dict[str, Any]:
             "message": "凭证缺 access_token,需重新授权",
             "guide": _BAIDU_REAUTH_HINT,
         }
+    # P2 复审修复: 不光看 access_token 字符串是否存在,还要看 token_expires_at:
+    # - 有 expires_at 且已过期 → ok=False(让 BaiduSource.ensure_token 提前报
+    #   “需要重新授权”而不是在列网盘时才炸)
+    # - 无 expires_at(老凭证 / 手动填的) → 仅靠 string 存在不能代表可用,但
+    #   为不誤杀老数据(以及避免对 BaiduSource 依赖),这里不返 False。
+    #   严格验证需走 ensure_token() 走一轮 uinfo —— 但那会在探测阶段就发网络请求
+    #   且依赖 BaiduSource;本探测只读凭证不接网络,仅看本地元数据。
+    #   如果凭证过期但 expires_at 没填,首次 BaiduSource.list() 会自动报 110/111,
+    #   提醒重新授权,本探测不能代替它。
+    expires_at = cred.get("token_expires_at")
+    if expires_at is not None:
+        try:
+            from time import time as _now
+            if float(expires_at) <= _now():
+                return {
+                    "ok": False,
+                    "message": "百度网盘 access_token 已过期(token_expires_at 已过),需重新授权",
+                    "guide": _BAIDU_REAUTH_HINT,
+                }
+        except (TypeError, ValueError):
+            # 解析不了 → 忽略过期检查,走下面 ok=True
+            pass
     return {
         "ok": True,
         "message": "百度网盘 token 可用",

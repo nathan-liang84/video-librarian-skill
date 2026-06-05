@@ -153,3 +153,177 @@ def test_record_from_item_baidu_fields():
     assert rec.remote_md5 == "d" * 32
     assert rec.fs_id == "123"
     assert rec.remote_path == "/网盘/v.mp4"
+
+
+# ---------- F. (P2-1 回归) record_from_item size → filesize_mb ----------
+
+def test_record_from_item_populates_filesize_mb():
+    """【P2-1 回归】SourceItem.size(字节) 必转 Record.filesize_mb(MB),不丢网盘/本地记录元数据。"""
+    scan = _load("scan01h", "scripts/01_scan.py")
+    # 1MB = 1048576 bytes
+    it = SourceItem(path="/m/v.mp4", media_type="video", size=1048576, sha1="e" * 40)
+    rec = scan.record_from_item(it, source="local")
+    assert rec.filesize_mb is not None
+    assert abs(rec.filesize_mb - 1.0) < 1e-6, f"filesize_mb 应为 1.0,得到 {rec.filesize_mb}"
+
+    # 0 字节 → None(不报 0.0)
+    it_zero = SourceItem(path="/m/empty", media_type="video", size=0, sha1="f" * 40)
+    rec_zero = scan.record_from_item(it_zero, source="local")
+    assert rec_zero.filesize_mb is None
+
+    # 网盘记录也走同一转换逻辑
+    it_net = SourceItem(path="/网盘/v.mp4", media_type="video",
+                        content_md5="a" * 32, size=5 * 1024 * 1024)
+    rec_net = scan.record_from_item(it_net, source="baidu")
+    assert abs(rec_net.filesize_mb - 5.0) < 1e-6
+
+
+# ---------- G. (P1 回归) 01_scan.main() 走 Source 管线(不是旧 rglob) ----------
+
+def test_main_uses_source_pipeline(tmp_path, monkeypatch):
+    """【P1 回归】main() 接 --source,走 build_source().list(),不是旧 Path.rglob。
+
+    验证 3 点:
+    1. main() 调了 build_source()(可 monkeypatch 拦截)
+    2. main() 用 source.list() 枚举(不走 os.walk)
+    3. main() 产生的 Record.source 字段是传入的 source 名(证明 record_from_item 接过 SourceItem)
+    """
+    import importlib.util as _il
+    scan_spec = _il.spec_from_file_location("scan01_main", "scripts/01_scan.py")
+    scan = _il.module_from_spec(scan_spec)
+    scan_spec.loader.exec_module(scan)
+
+    # Monkeypatch build_source 拦截,记录调用
+    called = {"build_source": 0, "list_root": None}
+    real_build = scan.build_source
+
+    def _fake_build(cfg, source=None):
+        called["build_source"] += 1
+
+        class _Stub:
+            name = source or "local"
+
+            def list(self, root):
+                called["list_root"] = root
+                # 返两条 SourceItem(一条 video 一条 photo),与本地内容无关
+                from adapters.source_base import SourceItem as _SI
+                return [
+                    _SI(path=str(tmp_path / "x.mp4"), media_type="video",
+                        size=2048, sha1="1" * 40),
+                    _SI(path=str(tmp_path / "y.jpg"), media_type="photo",
+                        size=4096, sha1="2" * 40),
+                ]
+
+            def stat(self, item):
+                return item
+
+        return _Stub()
+
+    monkeypatch.setattr(scan, "build_source", _fake_build)
+
+    # 准备 config + manifest
+    mpath = tmp_path / "manifest.json"
+    monkeypatch.setattr("sys.argv",
+                        ["01_scan.py", "--input", str(tmp_path),
+                         "--manifest", str(mpath),
+                         "--source", "local"])
+    assert scan.main() == 0
+
+    # 1) build_source 被调过
+    assert called["build_source"] == 1
+    # 2) source.list() 用了绝对路径(主流程接 Source 抽象)
+    assert called["list_root"] == str(tmp_path.resolve())
+    # 3) Record.source 是传入的 source
+    from lib.manifest import Manifest as _M
+    m = _M(mpath).load()
+    assert len(m._records) == 2
+    for r in m._records.values():
+        assert r.source == "local"
+        assert r.filesize_mb is not None
+
+
+# ---------- H. (P1 回归) run_all.py 传 --source 给 01_scan ----------
+
+def test_run_all_passes_source_to_01_scan(tmp_path, monkeypatch):
+    """【P1 回归】run_all.py 调 01_scan 时必须带 --source。
+
+    拦截 subprocess.run 记录传给 01_scan 的 argv,验证 --source 出现且值正确。
+    """
+    import importlib.util as _il
+    spec = _il.spec_from_file_location("runall_p1", "scripts/run_all.py")
+    mod = _il.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        # raise on incomplete 后面也走不到
+        class _R: returncode = 0
+        return _R()
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr("sys.argv",
+                        ["run_all.py", "--input", str(tmp_path), "--source", "baidu"])
+
+    # run_all.py 的 main() 会在 source=baidu 时尝试读 cred_path(可能 raise);
+    # 补一个 cred 文件拦截
+    (tmp_path / "cred.json").write_text('{"access_token": "***"}', encoding="utf-8")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        f"source:\n  type: baidu\n  baidu:\n    cred_path: '{tmp_path / 'cred.json'}'\n",
+        encoding="utf-8")
+
+    try:
+        mod.main()
+    except Exception:
+        # 后续阶段可能因 mock 而崩,我们只关心 01_scan 那次 call
+        pass
+
+    # 找到 01_scan 的那次调用
+    scan_calls = [c for c in calls if any("01_scan.py" in s for s in c)]
+    assert scan_calls, f"run_all 没调 01_scan; 实际调了 {calls}"
+    argv = scan_calls[0]
+    assert "--source" in argv, f"01_scan 没收到 --source: {argv}"
+    src_idx = argv.index("--source")
+    assert argv[src_idx + 1] == "baidu", f"01_scan --source 值不是 baidu: {argv}"
+
+
+# ---------- I. (P2-2 回归) probe_baidu_token 检查 token_expires_at ----------
+
+def test_probe_baidu_token_detects_expired_token(tmp_path):
+    """【P2-2 回归】有 token_expires_at 且已过期 → ok=False。
+
+    原实现只看 access_token 字符串存在,过期 token 也返 ok=True。
+    """
+    env = _load("env00_2", "scripts/00_detect_env.py")
+    import time
+    cred = tmp_path / "cred.json"
+    # expires_at = 1000(早已过期)
+    cred.write_text(json.dumps({"access_token": "***", "refresh_token": "***",
+                                "token_expires_at": 1000}), encoding="utf-8")
+    out = env.probe_baidu_token(cred)
+    assert out["ok"] is False
+    assert "过期" in out["message"] or "expire" in out["message"].lower()
+
+
+def test_probe_baidu_token_passes_future_expiry(tmp_path):
+    """token_expires_at 未过期 → ok=True。"""
+    env = _load("env00_3", "scripts/00_detect_env.py")
+    import time
+    cred = tmp_path / "cred.json"
+    cred.write_text(json.dumps({"access_token": "***", "refresh_token": "***",
+                                "token_expires_at": time.time() + 3600}),
+                    encoding="utf-8")
+    out = env.probe_baidu_token(cred)
+    assert out["ok"] is True
+
+
+def test_probe_baidu_token_no_expiry_field_still_passes(tmp_path):
+    """无 token_expires_at 字段(老凭证)→ 仍按字符串存在判 ok=True(不誤杀老数据)。"""
+    env = _load("env00_4", "scripts/00_detect_env.py")
+    cred = tmp_path / "cred.json"
+    cred.write_text(json.dumps({"access_token": "***", "refresh_token": "***"}),
+                    encoding="utf-8")
+    out = env.probe_baidu_token(cred)
+    assert out["ok"] is True

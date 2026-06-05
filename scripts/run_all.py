@@ -26,6 +26,8 @@ def main() -> int:
     ap.add_argument("--manifest", default="state/manifest.json")
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--workdir", default="tmp")
+    ap.add_argument("--source", choices=["local", "baidu"], default="local",
+                    help="数据源:local=本地目录(默认),baidu=百度网盘(需 cfg[source][baidu][cred_path])")
     ap.add_argument("--tier", choices=["quick", "refine"], default=None)
     ap.add_argument("--apply-rename", action="store_true",
                     help="确认 dry-run 结果后,真正执行改名并继续入库")
@@ -35,9 +37,11 @@ def main() -> int:
     args = ap.parse_args()
 
     _run("00_detect_env.py")
-    input_path = str(Path(args.input).resolve())
+    input_path = str(Path(args.input).resolve()) if args.source == "local" else args.input
 
-    _run("01_scan.py", "--input", input_path, "--manifest", args.manifest)
+    # P1-N5: 传 --source 给 01_scan,让 local/baidu 走同一份主流程
+    _run("01_scan.py", "--input", input_path, "--manifest", args.manifest,
+         "--source", args.source, "--config", args.config)
     _run("02_extract.py", "--manifest", args.manifest,
          "--config", args.config, "--workdir", args.workdir)
 
