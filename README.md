@@ -1,5 +1,7 @@
 # VideoLibrarian — 视频/照片素材智能整理 Skill
 
+[![tests](https://github.com/nathan-liang84/video-librarian-skill/actions/workflows/tests.yml/badge.svg)](https://github.com/nathan-liang84/video-librarian-skill/actions/workflows/tests.yml)
+
 一套**跨 Agent 平台通用的 Skill**(OpenClaw / Codex / Claude Code 均可调用):自动"读懂"大量视频与照片素材 → 总结 + 打标签 + 规范命名 → 汇总成可检索的素材总表 → 按剪辑脚本快速匹配可用素材。
 
 > 设计文档见 [PRD.md](PRD.md)。
