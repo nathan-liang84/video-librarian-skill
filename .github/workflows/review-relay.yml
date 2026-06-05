@@ -1,0 +1,82 @@
+name: review-relay
+
+# Codex QA 中继:解决 Codex 环境 api.github.com DNS 写请求不通的问题。
+#
+# 用法(Codex 执行):
+#   1. 把审查结果写入 .github/review-queue/pr-<N>.json
+#   2. git push origin <任意分支>  ← 只要推了这个文件就会触发
+#   3. 本 workflow 自动读取、发 review、清空队列文件
+#
+# JSON 格式:
+#   {
+#     "pr":    40,                          # PR 编号
+#     "sha":   "2ecec60...",                # 期望的 head commit SHA(完整或前7位)
+#     "event": "APPROVE|REQUEST_CHANGES|COMMENT",
+#     "body":  "review 正文..."
+#   }
+
+on:
+  push:
+    paths:
+      - '.github/review-queue/*.json'
+
+permissions:
+  pull-requests: write
+  contents: write   # 用于清空队列文件
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 拉触发此 push 的分支,确保能读到刚推入的 JSON 文件
+          ref: ${{ github.ref }}
+
+      - name: Post reviews from queue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          FAILED=0
+
+          for f in .github/review-queue/*.json; do
+            [ -f "$f" ] || continue
+
+            PR=$(jq -r '.pr'    "$f")
+            SHA=$(jq -r '.sha'  "$f")
+            EVENT=$(jq -r '.event' "$f")
+            BODY=$(jq -r '.body'   "$f")
+
+            # 校验 head SHA 匹配(防止在旧版本上发 review)
+            ACTUAL=$(gh pr view "$PR" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json headRefOid --jq '.headRefOid')
+
+            if [[ "$ACTUAL" != "$SHA"* ]]; then
+              echo "::error::PR #$PR head SHA 不匹配:期望 $SHA,实际 $ACTUAL"
+              FAILED=1
+              continue
+            fi
+
+            echo "→ 发 $EVENT review on PR #$PR (head $SHA)"
+            gh pr review "$PR" \
+              --repo "$GITHUB_REPOSITORY" \
+              --event "$EVENT" \
+              --body "$BODY"
+
+            echo "✓ PR #$PR review 已发"
+          done
+
+          [ $FAILED -eq 0 ] || exit 1
+
+      - name: Clear queue
+        if: success()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 删除 JSON 文件,保留 .gitkeep
+          git rm --ignore-unmatch .github/review-queue/*.json || true
+          git diff --cached --quiet || \
+            git commit -m "chore(relay): clear review queue [skip ci]"
+          git push
