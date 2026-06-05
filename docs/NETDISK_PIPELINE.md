@@ -1,8 +1,32 @@
 # 网盘数据源规划(Netdisk Pipeline Plan)
 
-> 状态:**规划中**(planning)。本文件只定方向与设计,不含实现。落地时按"分阶段、每阶段独立 PR"推进。
+> 状态:**Phase 0 实测完成 ✅(2026-06-05),进入 Phase 1 实现**。本文件定方向与设计;实现按"分阶段、每阶段独立 PR"推进。
 > 负责人:Opus 4.8。关联:[PRD.md](../PRD.md)、[SKILL.md](../SKILL.md)、[docs/PHOTO_PIPELINE.md](PHOTO_PIPELINE.md)。
-> 本 PR 仅新增本文件,**不改 README/PRD**(避免与在审 PR 冲突);方向确认后,README"数据层"段与 PRD §11 再补一句指针。
+
+## 0.2 Phase 0 实测结论(2026-06-05)——全部 GO,无需降级
+
+用真实账号(SVIP)注册的网盘开放平台应用,设备码授权(`scope=basic,netdisk`)拿到 30 天 token 后,实测如下:
+
+| 验证项 | 结果 | 对方案的影响 |
+|---|---|---|
+| OAuth 授权 + token | ✅ 设备码流程通,access/refresh token 已就绪 | 无需回调域名,脚本/桌面可用 |
+| 读:`uinfo`/`quota`/`list` | ✅ `errno=0`,根目录正常枚举 | Phase 1 只读建库可行 |
+| 写:**普通目录**建文件夹 | ✅ `errno=0` | Phase 3 归集可建在**任意目录**,非 `/apps` 沙箱 |
+| 写:改名(`filemanager rename`) | ✅ `errno=0` | Phase 2 **可直接改原文件名** |
+| 写:小文件三步上传 | ✅ `precreate→superfile2→create` 全通 | Phase 2 **旁车 JSON 可回传网盘** |
+| 写:**跨目录** copy(`filemanager&opera=copy`) | ✅ `errno=0`(2026-06-05 补测) | Phase 3 归集**服务端跨目录复制可行** |
+| 写:**跨目录** move(`filemanager&opera=move`) | ✅ `errno=0`(2026-06-05 补测) | Phase 3 归集亦可用移动 |
+| 读:视频 `streaming`(M3U8) | ✅ 已转码视频 HTTP 200 直返 `#EXTM3U` 文本 | Phase 1 抽帧走 HLS 可行(未转码走 31341 退避/封面兜底) |
+| 删除清理 | ✅ 探测文件夹已删,账号无残留 | — |
+| 账号等级 | **SVIP** | dlink 不限速,§7 风险③ 基本解除 |
+
+> 备注:copy/move 的**配额上限、未转码视频转码就绪率**等规模化行为仍待 Phase 1/3 真机标定;接口路径本身(建夹/改名/上传/copy/move/streaming)均已实测连通。
+
+> **结论:写权限边界(§7 风险①,原最高优先级 go/no-go)落在普通目录可读可写可改名——完全放行,Phase 2/3 无需 `/apps` 镜像降级。** 凭证存本地仓库外 `~/.config/video-librarian/baidu_credentials.json`(600),不入库、不进 git。
+
+---
+
+> 本 PR(初版)仅新增本文件,**不改 README/PRD**(避免与在审 PR 冲突);方向确认后,README"数据层"段与 PRD §11 再补一句指针。
 
 ## 0. 决策(已与用户确认)
 
@@ -22,12 +46,12 @@
 |---|---|:--:|---|
 | ① 读取/列目录/拿元数据 | `xpan/file?method=list`、`xpan/multimedia?method=filemetas`(含 `md5`/`size`/`thumbs`/`dlink`) | ✅ | 零(只读元数据) |
 | ② 理解→生成总结 JSON | 视频走 `xpan/file?method=streaming`(HLS/M3U8)只抽关键帧;照片小文件经 `dlink` 直下 | ✅ | **低**(不下整片) |
-| ② JSON 写回网盘 | 三步上传 `precreate → superfile2/upload → create`(JSON 很小) | ⚠️ 待验证 | 极低 |
-| ③ 改名 | `xpan/file?method=filemanager&opera=rename` | ⚠️ 待验证 | 零 |
+| ② JSON 写回网盘 | 三步上传 `precreate → superfile2/upload → create`(JSON 很小) | ✅ 实测通过 | 极低 |
+| ③ 改名 | `xpan/file?method=filemanager&opera=rename` | ✅ 实测通过 | 零 |
 | ④ 本地总表 + 记网盘地址 | 复用现有"旁车 JSON + 素材总表",每条记 `remote_path` + `fs_id` + `md5` | ✅ | 零 |
-| ⑤ 新建文件夹 + 归集视频 | `xpan/file?method=create`(`isdir=1`)+ `filemanager&opera=copy/move` | ⚠️ 待验证 | **零(服务端操作)** |
+| ⑤ 新建文件夹 + 归集视频 | `xpan/file?method=create`(`isdir=1`)+ `filemanager&opera=copy/move` | ✅ 实测通过(建夹 + **跨目录 copy/move** 均 errno=0) | **零(服务端操作)** |
 
-> **读(①②④)= 已可行;写(②写回 / ③改名 / ⑤归集)= 接口存在,但"能写到哪"取决于应用写权限边界,标 ⚠️ 待验证**。个人应用可能被限制在 `/apps/<应用名>/` 目录(见 §7 风险①),因此**写类能力(Phase 2/3)以 Phase 0 实测写权限为前提**;若受限,默认回退到"`/apps` 镜像目录 + 只在总表记建议新名、不动原文件"(见 §7、§10)。
+> **读写均已 Phase 0 实测通过(2026-06-05,见 §0.2)**:写操作在**普通目录**成功(建文件夹/改名/小文件上传),**未被限制到 `/apps/<应用名>/` 沙箱**。因此 Phase 2/3 直接对原文件操作,**`/apps` 镜像降级方案不再需要**(保留在 §7 仅作历史记录)。
 >
 > **关键洞察(写权限放行后)**:第 ⑤ 步"把选中的大视频归集到新文件夹"是网盘**服务端的 copy/move**,纯元数据操作、秒级完成,**完全不经过本地、不受下载限速影响**。整条流程里唯一耗带宽的只有"抽帧理解",而抽帧用 HLS 流只取几张关键帧、不下整片。一个 2GB 视频从扫描到归集,本地几乎不下载它的完整内容。这比"本地打 zip 发剪辑"更优 —— 剪辑同事直接从网盘那个新文件夹转存即可。
 
@@ -115,11 +139,9 @@
 
 ## 7. 风险与对策
 
-1. **【go/no-go】写入目录可能受限**:个人应用 `scope=basic,netdisk`,但写权限在不少情况下被收窄到"我的应用数据 `/apps/<应用名>/`"目录。
-   - 影响:可能无法在**原视频旁边**写旁车 JSON / 原地改名 / 把任意目录的视频归集走。
-   - 对策:**Phase 0 先注册应用实测写边界**。若受限,采用"应用目录内镜像":旁车与归集文件夹建在 `/apps/<应用名>/` 下;原文件改名若不被允许,则退化为"只在总表/旁车记录建议新名,不动网盘原文件"(只读建库仍完整可用)。先读后写的分期正是为隔离这条风险。
-2. **应用审核 / 实名**:百度开放平台个人应用需实名 + 绑手机邮箱,可能走审核。Phase 0 的产出之一就是"账号与应用就绪 + 拿到 token"。
-3. **dlink 下载限速**:非会员 `dlink` 限速(几十~几百 KB/s)。对策:能走 HLS 抽帧的视频不走 dlink;照片小文件影响小;**最重的归集第 ⑤ 步是服务端 move、根本不下载**,所以限速对主流程几乎无影响。
+1. **【已解除 ✅】写入目录受限**:~~个人应用写权限可能被收窄到 `/apps/<应用名>/`~~ —— **Phase 0 实测(§0.2):普通目录建夹/改名/上传全部 `errno=0`,未触发 `/apps` 沙箱。Phase 2/3 直接对原文件操作,无需镜像降级。** (原降级方案保留作历史参考:若换到受限的应用类型,可回退到"`/apps` 镜像 + 总表只记建议名"。)
+2. **【已解除 ✅】应用审核 / 实名**:Phase 0 已完成应用注册 + 设备码授权,拿到 30 天 token(account: SVIP)。
+3. **【已大幅缓解 ✅】dlink 下载限速**:非会员 `dlink` 限速;**本账号为 SVIP,直链不限速**。即便如此,主流程仍优先 HLS 抽帧、归集走服务端 move(零下载),限速对方案无实质影响。
 4. **转码未就绪(31341)**:streaming 依赖百度先转码,大/冷门编码可能不转。对策:重试退避 + 封面兜底 + dlink 回退三级降级。
 5. **Token 生命周期**:access_token 30 天、可刷新。对策:本地安全存 refresh_token,过期自动刷新;`00_detect_env` 探测 token 有效性并给重新授权指引。
 6. **限频 / 配额**:list 大目录要翻页、避免高并发触发风控。对策:翻页 + 限速 + 断点续跑(沿用 manifest)。
@@ -147,17 +169,32 @@ source:
 
 ## 10. 落地顺序(PR 拆分建议)
 
-1. **Phase 0 · 接入与适配器骨架**:注册应用 + 授权拿 token;`BaiduSource` 实现 `list/stat`;`00_detect_env` 探测 token;**实测写权限边界**(产出 go/no-go 结论)。
-2. **Phase 1 · 只读建库**:`01_scan --source baidu` 列网盘 → `02` 视频走 HLS 抽帧/照片 dlink → `03` 理解 → `05` **本地旁车(落 `output_dir`,按 `record.id` 命名,不写远端同目录)+ 总表(记 `remote_path`+`fs_id`+`md5`)** → `06` 脚本匹配。**"只读"= 对网盘零写入**(旁车/总表都在本地);立即可用、零写权限风险。
-3. **Phase 2 · 写回网盘(以 Phase 0 写权限实测为前提)**:`04` 改名(filemanager rename)+ 旁车 JSON 回传(`write_back_sidecar`)。**默认回退**:写权限受限时 → 旁车进 `/apps/<应用名>/` 镜像、改名退化为"只在总表记建议新名、不动原文件"(见 §7 风险①)。
-4. **Phase 3 · 服务端归集 07_collect(同以 Phase 0 写权限为前提)**:按 `06` 匹配结果在网盘新建文件夹 + copy/move 选中素材;受限时归集目标落 `/apps/<应用名>/` 下。支持多份候选包、缺文件报告。这同时补上之前搁置的 `07_collect`(打包给剪辑)—— 网盘版比本地打 zip 更优。
+0. **Phase 0 · 接入与边界实测** —— ✅ **已完成(2026-06-05,见 §0.2)**:应用注册 + 设备码授权拿 token;读(list/uinfo/quota/streaming)与写(建夹/改名/上传/删除 + **跨目录 copy/move**)在普通目录全部实测通过;写权限 go/no-go = **GO**。**copy/move 跨目录已实测连通**,Phase 3 据此推进;惟配额上限/未转码视频比例等规模化行为留 Phase 1/3 真机标定,`07_collect` 仍保留缺文件报告与本地下发兜底。
+1. **Phase 1 · 只读建库**(进行中):`01_scan --source baidu` 列网盘 → `02` 视频走 HLS 抽帧/照片 dlink → `03` 理解 → `05` **本地旁车(落 `output_dir`,按 `record.id` 命名,不写远端同目录)+ 总表(记 `remote_path`+`fs_id`+`md5`)** → `06` 脚本匹配。**"只读"= 对网盘零写入**(旁车/总表都在本地);立即可用、零风险。拆分见 §12。
+2. **Phase 2 · 写回网盘**:`04` 改名(filemanager rename)+ 旁车 JSON 回传(`write_back_sidecar`)。Phase 0 已确认写权限,**直接对原文件操作**,无需镜像降级。
+3. **Phase 3 · 服务端归集 07_collect**:按 `06` 匹配结果在网盘新建文件夹 + copy/move 选中素材(任意目录)。支持多份候选包、缺文件报告。补上搁置的 `07_collect`(打包给剪辑)—— 网盘版服务端 move 零带宽,优于本地打 zip。
 
 每步独立 PR、独立测试;Phase 1 合并后即可"只读建库 + 本地总表记网盘地址",Phase 2/3 再补写回与归集。
 
+## 12. Phase 1 实现拆分(只读建库)
+
+> 分工依 COLLAB 章程:契约/网络/认证 = Opus;机械集成层 = Atlas(带 Opus 验收测试)。各任务在 COLLAB 建 issue。
+
+| # | 任务 | 归属 | 要点 / 边界 |
+|---|---|---|---|
+| **P1-N1** | **数据源适配器抽象 + 契约字段** | **Opus**(契约级) | 新增 `adapters/source_base.py`(`Source` ABC:`list/stat/frames/rename/mkdir/collect/put_sidecar`);schema/record 增 `source/remote_path/fs_id/remote_md5/collected_path`(均可选);`record.id` 仍由内容指纹派生(网盘用 `remote_md5`),`fs_id` 仅操作锚点。出 Opus 验收测试。 |
+| **P1-N2** | **LocalSource 重构** | **Atlas**(机械) | 把现有 `01_scan` 的 `os.walk`+ffprobe/EXIF 行为**零变化**包进 `LocalSource(Source)`;纳入 P1-N1 验收测试。 |
+| **P1-N3** | **BaiduSource:认证 + token 刷新 + list/stat** | **Opus**(网络/认证) | 从本地凭证文件读 token;过期用 refresh_token 自动续期;`list` 递归翻页 + `multimedia filemetas` 补 `md5/size/thumbs`;`record.id` 由 `remote_md5` 派生;限频退避。mock 测试,不打真实网盘。 |
+| **P1-N4** | **02_extract 网盘抽帧** | **Opus**(网络) | 视频:`streaming` 拿 M3U8 → ffmpeg 抽关键帧(处理 `31341` 转码未就绪重试/退避、UA、两次请求);照片:`dlink` 下载临时文件后本地抽,用完即删;封面 `thumbs` 兜底。 |
+| **P1-N5** | **管线接线 + 本地旁车落点 + token 探测** | **Atlas**(集成) | `01_scan` 接 `--source local\|baidu`;`05_store` 按 `source` 把网盘记录旁车落**本地 `output_dir`**(按 `record.id` 命名,**不写远端同目录**)+ 总表记 `remote_path/fs_id/md5`;`00_detect_env` 探测 token 有效性并给重新授权指引。纳入 Opus 验收测试。 |
+
+> 依赖顺序:**P1-N1 → (P1-N2 ∥ P1-N3) → P1-N4 → P1-N5**。Phase 1 全绿即可对你的网盘"只读建库 + 本地总表记地址",对网盘零写入。
+
 ## 11. 待定 / 风险清单(实现前需真机验证)
 
-- 写权限边界(`/apps/` 限制是否生效)—— **决定 Phase 2/3 形态,最高优先级**。
-- streaming 转码就绪率与抽帧质量(真实素材标定)。
+- ~~写权限边界(`/apps/` 限制是否生效)~~ —— ✅ **已实测解除(§0.2):普通目录可读可写可改名,跨目录 copy/move 亦 errno=0,无 `/apps` 限制。**
+- copy/move 的**配额上限 / 大批量行为**(接口路径已实测,规模化未压测)——Phase 3 `07_collect` 上线前标定,保留缺文件报告 + 本地下发兜底。
+- streaming 转码就绪率与抽帧质量(已转码视频直返 #EXTM3U;未转码 31341 比例需真实素材标定)——Phase 1 P1-N4。
 - list 大目录的翻页/限频表现与断点续跑配合。
 - `fs_id` 在改名+归集后的稳定性(理论稳定,需实测确认)。
 - 多账号/多 token 场景(暂不支持,单账号优先)。
