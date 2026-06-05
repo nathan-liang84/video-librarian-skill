@@ -327,7 +327,9 @@ def record_from_item(item: Any, *, source: str) -> Any:
         fs_id=item.fs_id,
         remote_md5=remote_md5,
         # 文件大小:SourceItem.size(字节) → Record.filesize_mb
-        filesize_mb=(item.size / (1024 * 1024)) if item.size else None,
+        # 与 01_scan 旧 build_record 契约字节对齐: round 到 3 位;0 字节 → 0.0(不返 None);
+        # 仅 item.size 缺(None / 未填)时才 None。
+        filesize_mb=round(item.size / (1024 * 1024), 3) if item.size is not None else None,
         # 原始元数据(raw["stat_meta"])透传到 Record 对应字段
         resolution=stat_meta.get("resolution"),
         fps=stat_meta.get("fps"),

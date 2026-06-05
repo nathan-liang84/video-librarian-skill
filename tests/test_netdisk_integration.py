@@ -158,24 +158,31 @@ def test_record_from_item_baidu_fields():
 # ---------- F. (P2-1 回归) record_from_item size → filesize_mb ----------
 
 def test_record_from_item_populates_filesize_mb():
-    """【P2-1 回归】SourceItem.size(字节) 必转 Record.filesize_mb(MB),不丢网盘/本地记录元数据。"""
+    """【P2-1 回归 + 旧契约】SourceItem.size(字节) 转 Record.filesize_mb(MB)需与
+    01_scan.build_record 旧契约字节对齐: round 到 3 位;0 字节 → 0.0(不返 None);
+    仅 item.size 缺(None)时才 None。"""
     scan = _load("scan01h", "scripts/01_scan.py")
     # 1MB = 1048576 bytes
     it = SourceItem(path="/m/v.mp4", media_type="video", size=1048576, sha1="e" * 40)
     rec = scan.record_from_item(it, source="local")
     assert rec.filesize_mb is not None
-    assert abs(rec.filesize_mb - 1.0) < 1e-6, f"filesize_mb 应为 1.0,得到 {rec.filesize_mb}"
+    assert rec.filesize_mb == 1.0, f"filesize_mb 应为 1.0,得到 {rec.filesize_mb}"
 
-    # 0 字节 → None(不报 0.0)
+    # 0 字节 → 0.0(旧契约 round(0/1024/1024, 3) == 0.0; 不是 None)
     it_zero = SourceItem(path="/m/empty", media_type="video", size=0, sha1="f" * 40)
     rec_zero = scan.record_from_item(it_zero, source="local")
-    assert rec_zero.filesize_mb is None
+    assert rec_zero.filesize_mb == 0.0, f"0 字节旧契约应为 0.0,得到 {rec_zero.filesize_mb}"
+
+    # 3 位 round 验证:1234567 bytes = 1.1773777... MB → round(., 3) = 1.177
+    it_round = SourceItem(path="/m/r.mp4", media_type="video", size=1234567, sha1="a" * 40)
+    rec_round = scan.record_from_item(it_round, source="local")
+    assert rec_round.filesize_mb == 1.177, f"round 3 位应为 1.177,得到 {rec_round.filesize_mb}"
 
     # 网盘记录也走同一转换逻辑
     it_net = SourceItem(path="/网盘/v.mp4", media_type="video",
                         content_md5="a" * 32, size=5 * 1024 * 1024)
     rec_net = scan.record_from_item(it_net, source="baidu")
-    assert abs(rec_net.filesize_mb - 5.0) < 1e-6
+    assert rec_net.filesize_mb == 5.0
 
 
 # ---------- G. (P1 回归) 01_scan.main() 走 Source 管线(不是旧 rglob) ----------
@@ -327,3 +334,85 @@ def test_probe_baidu_token_no_expiry_field_still_passes(tmp_path):
                     encoding="utf-8")
     out = env.probe_baidu_token(cred)
     assert out["ok"] is True
+
+
+# ---------- J. (P1 第二轮 回归) run_all --source baidu 01 后停止 ----------
+
+def test_run_all_baidu_stops_after_01(tmp_path, monkeypatch):
+    """【P1 第二轮 回归】run_all --source baidu 模式: 调完 01_scan 后必须返回,
+    不调 02/03/04/05(避免本地 ffmpeg/PIL 吃到远端路径)。
+    """
+    import importlib.util as _il
+    spec = _il.spec_from_file_location("runall_p1b", "scripts/run_all.py")
+    mod = _il.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class _R:
+            returncode = 0
+        return _R()
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+    # 准备 cred 防 BaiduSource 初始化报错
+    (tmp_path / "cred.json").write_text(
+        '{"access_token": "***", "refresh_token": "***"}', encoding="utf-8")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        f"source:\n  type: baidu\n  baidu:\n    cred_path: '{tmp_path / 'cred.json'}'\n",
+        encoding="utf-8")
+
+    monkeypatch.setattr("sys.argv",
+                        ["run_all.py", "--input", "/网盘/素材集", "--source", "baidu"])
+    rc = mod.main()
+    assert rc == 0
+
+    # 01 必须调过
+    scan_calls = [c for c in calls if any("01_scan.py" in s for s in c)]
+    assert scan_calls, f"run_all baidu 模式没调 01_scan: {calls}"
+
+    # 02/03/04/05 必须没被调
+    forbidden = ["02_extract.py", "03_understand.py", "04_tag_name.py", "05_store.py"]
+    for f in forbidden:
+        bad = [c for c in calls if any(f in s for s in c)]
+        assert not bad, f"run_all baidu 模式不应调 {f}, 实际调了: {bad}"
+
+
+def test_run_all_local_unchanged_flow(tmp_path, monkeypatch):
+    """【P1 第二轮 对照回归】run_all --source local(默认)仍走 00→01→02→03→(04→05) 完整流程。"""
+    import importlib.util as _il
+    spec = _il.spec_from_file_location("runall_p1c", "scripts/run_all.py")
+    mod = _il.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class _R:
+            returncode = 0
+        return _R()
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr("sys.argv",
+                        ["run_all.py", "--input", str(tmp_path), "--apply-rename"])
+
+    try:
+        mod.main()
+    except Exception:
+        pass  # 后续阶段可能崩,只关心调用顺序
+
+    called_scripts = [c[1].split("/")[-1] for c in calls]
+    for expected in ("00_detect_env.py", "01_scan.py", "02_extract.py",
+                     "03_understand.py", "04_tag_name.py", "05_store.py"):
+        assert expected in called_scripts, (
+            f"local 模式应调 {expected},实际调了 {called_scripts}"
+        )
+    # 不应调 01 后提前返回:必须 02 之后才有调用
+    one_idx = called_scripts.index("01_scan.py")
+    two_idx = called_scripts.index("02_extract.py")
+    assert two_idx > one_idx
