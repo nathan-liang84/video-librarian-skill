@@ -85,13 +85,17 @@ class BaiduSource(Source):
     def _token_expired(self) -> bool:
         exp = self._cred.get("token_expires_at")
         if not exp:
-            return False  # 未知有效期 → 不主动刷新,靠接口报错触发
+            return False  # 未知有效期 → 不主动刷新;_api 遇 token 错误码会反应式刷新重试
         return time.time() >= (float(exp) - self._refresh_skew)
 
     def ensure_token(self) -> str:
         """确保 access_token 可用;将过期则用 refresh_token 续期并回写凭证文件。"""
         if self._token and not self._token_expired():
             return self._token
+        return self._do_refresh()
+
+    def _do_refresh(self) -> str:
+        """用 refresh_token 续期 access_token 并回写凭证文件(主动过期 + 反应式刷新共用)。"""
         rt = self._cred.get("refresh_token")
         ak = self._cred.get("app_key")
         sk = self._cred.get("secret_key")
@@ -133,10 +137,18 @@ class BaiduSource(Source):
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode
 
-    def _api(self, base: str, method: str, params: dict[str, Any], *, where: str) -> dict[str, Any]:
+    # token 相关错误码:111=access_token 过期;-6=身份校验失败/无效 token
+    _TOKEN_ERRNOS = (111, -6)
+
+    def _api(self, base: str, method: str, params: dict[str, Any], *, where: str,
+             _retried: bool = False) -> dict[str, Any]:
         p = {"method": method, "access_token": self.ensure_token(), **params}
         data = self._http_get_json(base, p, where=where)
         errno = data.get("errno", 0)
+        # 反应式刷新:token 过期/失效(未知有效期或被提前吊销时)→ 刷新一次再重试
+        if errno in self._TOKEN_ERRNOS and not _retried:
+            self._do_refresh()
+            return self._api(base, method, params, where=where, _retried=True)
         if errno not in (0, None):
             raise BaiduError(errno, where)
         return data

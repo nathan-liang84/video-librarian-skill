@@ -4,9 +4,11 @@ config/config.*.local.yaml
 .env
 
 # 凭证 / 密钥兜底(实际凭证存仓库外 ~/.config/video-librarian/)
-*credential*
-*secret*
-*_token*
+# 用锚定到文件名的窄模式,避免误伤源码(如 test_secret_*.py / *_token_helper.py)
+*credentials*.json
+*.credentials.json
+.env.*
+*.pem
 *.key
 
 # 运行状态
