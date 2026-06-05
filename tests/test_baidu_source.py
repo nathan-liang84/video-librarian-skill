@@ -55,6 +55,43 @@ def test_ensure_token_refreshes_when_expired(tmp_path):
     assert saved["token_expires_at"] > time.time()
 
 
+def test_api_reactively_refreshes_on_token_error(tmp_path):
+    """token 有效期未知却已失效(errno 111)→ _api 反应式刷新并重试一次,而非直接抛错。
+
+    回归 #35 漏审缺陷:旧实现注释写"靠接口报错触发刷新",但 _api 遇 errno!=0 直接抛。
+    """
+    # token_expires_at 不写 → _token_expired() 返 False,ensure_token 不会主动刷新
+    src = BaiduSource(_cred(tmp_path, token_expires_at=None))
+    calls = {"api": 0, "refresh": 0}
+    seq = [{"errno": 111}, {"errno": 0, "list": [], "has_more": 0}]
+
+    def fake(base, params, *, where):
+        if where == "refresh":
+            calls["refresh"] += 1
+            return {"access_token": "FRESH", "expires_in": 2592000}
+        i = calls["api"]; calls["api"] += 1
+        return seq[i]
+    src._http_get_json = fake
+    data = src._api(sb._MULTIMEDIA, "listall", {"path": "/"}, where="listall")
+    assert data["errno"] == 0
+    assert calls["refresh"] == 1          # 触发了一次刷新
+    assert calls["api"] == 2              # 刷新后重试一次
+    assert src._cred["access_token"] == "FRESH"
+
+
+def test_api_token_error_raises_after_one_retry(tmp_path):
+    """刷新后仍 token 错误 → 不无限重试,最终抛 BaiduError。"""
+    src = BaiduSource(_cred(tmp_path, token_expires_at=None))
+
+    def fake(base, params, *, where):
+        if where == "refresh":
+            return {"access_token": "X", "expires_in": 2592000}
+        return {"errno": 111}
+    src._http_get_json = fake
+    with pytest.raises(sb.BaiduError):
+        src._api(sb._MULTIMEDIA, "listall", {"path": "/"}, where="listall")
+
+
 # ---------------- list:翻页 + 过滤 + md5 ----------------
 
 def _wire_list(src, pages, metas):
