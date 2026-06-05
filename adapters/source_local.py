@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -49,6 +50,11 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 
 # Windows 系统垃圾(不以 '.' 开头,按文件名整体匹配,大小写不敏感)
 _WIN_JUNK = {"thumbs.db", "desktop.ini", "ehthumbs.db"}
+
+# Live Photo 配对判定集:与 01_scan._LIVE_MOTION_EXTS / _LIVE_STILL_EXTS 字节对齐
+# (P2-1 复审修复: 丢失配对会破坏零行为变化)。
+_LIVE_MOTION_EXTS = {".mov"}
+_LIVE_STILL_EXTS = {".heic", ".heif", ".jpg", ".jpeg"}
 
 
 def _is_junk_name(name: str) -> bool:
@@ -180,7 +186,11 @@ def _probe_video(path: Path) -> dict[str, Any]:
 
 
 def _probe_photo(path: Path) -> dict[str, Any]:
-    """读 EXIF。失败/缺 PIL/缺 pillow-heif 返 {}。不抛。"""
+    """读 EXIF。失败/缺 PIL/缺 pillow-heif 返 {}。不抛。
+
+    写法与 01_scan 严格对齐(用 raw EXIF values,不经 str() 转换):否则 ``str(None)``
+    是 truthy 字符串,会冒充时间戳并屏蔽 mtime 兑底(P2-3 复审修复)。
+    """
     try:
         register_heif()  # 确保 pillow-heif 注册;若未装,静默返回 False,后续路径退化为空
     except Exception:  # noqa: BLE001
@@ -192,10 +202,13 @@ def _probe_photo(path: Path) -> dict[str, Any]:
     try:
         with Image.open(str(path)) as im:
             exif = im.getexif() or {}
-            shot_at = _iso_datetime(str(exif.get(36867)) or str(exif.get(306)))
+            # raw:不要 str()——None 变 "None" 必是 truthy 会撑起 shot_at
+            dt_raw = exif.get(36867) or exif.get(306)  # DateTimeOriginal / DateTime
+            shot_at = _iso_datetime(dt_raw) if dt_raw else None
+            model = exif.get(272)  # Model
             return {
                 "shot_at": shot_at,
-                "device": str(exif.get(272)) if exif.get(272) else None,  # Model
+                "device": str(model) if model else None,
             }
     except Exception:  # noqa: BLE001
         return {}
@@ -220,17 +233,22 @@ class LocalSource(Source):
     def list(self, root: str) -> Iterable[SourceItem]:
         """递归枚举 root 下的媒体,过滤非媒体与系统垃圾。
 
-        行为与 `scripts/01_scan.py` 字节对齐(SHA1、扩展名、junk 规则):
+        行为与 `scripts/01_scan.py` 字节对齐(SHA1、扩展名、junk 规则、Live Photo 配对):
             - ``rglob("*")`` → 递归
             - 跳过非文件(目录/软链目标不存在等)
             - 跳过系统垃圾(`._*` / `Thumbs.db` ...)
             - 跳过非媒体扩展名
             - 计算 SHA1(1MB chunk)+ 绝对路径 + size → SourceItem
+            - 【P2-1 复审修复】Live Photo 配对:同主名 HEIC/JPEG + 唯一 .mov
+              → 动态 .mov 上标 ``raw["status"] = "live_motion_skip"``,
+              静态照片上标 ``raw["live_motion_path"] = <motion 绝对路径>``。
+              下游构建 Record 时读取 ``raw`` 透传到 Record 字段。
         """
         root_path = Path(root)
         if not root_path.exists():
             return iter(())
-        return self._iter_media(root_path)
+        items = list(self._iter_media(root_path))
+        return self._iter_with_live_photo_pairing(items)
 
     def _iter_media(self, root: Path) -> Iterator[SourceItem]:
         """惰性生成器:大目录不必一次读完。"""
@@ -253,6 +271,51 @@ class LocalSource(Source):
                 size=size,
                 sha1=_sha1_file(path),
             )
+
+    @staticmethod
+    def _pair_live_photos(items: list[SourceItem]) -> dict[Path, Path]:
+        """Live Photo 配对:与 ``01_scan.pair_live_photos`` 字节对齐。
+
+        判定:同目录、同主名(不分大小写)下【恰好】1 张 Live Photo 静态图
+        (HEIC/JPEG)+ 1 个 .mov 才配对。歧义(多张静态 / 多个 .mov)不配,
+        避免误伤真实视频。
+
+        返回:``{motion_path: photo_path}``。调用方负责在 SourceItem.raw 上标 metadata。
+        """
+        groups: dict[tuple[str, str], dict[str, list[Path]]] = {}
+        for it in items:
+            p = Path(it.path)
+            stem = p.stem.lower()
+            key = (str(p.parent), stem)
+            bucket = groups.setdefault(key, {"photo": [], "motion": []})
+            suffix = p.suffix.lower()
+            if it.media_type == "photo" and suffix in _LIVE_STILL_EXTS:
+                bucket["photo"].append(p)
+            elif suffix in _LIVE_MOTION_EXTS:
+                bucket["motion"].append(p)
+        pairs: dict[Path, Path] = {}
+        for bucket in groups.values():
+            if len(bucket["photo"]) == 1 and len(bucket["motion"]) == 1:
+                pairs[bucket["motion"][0]] = bucket["photo"][0]
+        return pairs
+
+    def _iter_with_live_photo_pairing(self, items: list[SourceItem]) -> Iterator[SourceItem]:
+        """对 raw 枚举结果加 Live Photo 配对标记,最后再产出。
+
+        静态照片: ``raw["live_motion_path"]`` = 配对 .mov 绝对路径。
+        动态 .mov: ``raw["status"]`` = ``"live_motion_skip"``(分支终态)。
+        未配对:保持原样。
+        """
+        pairs = self._pair_live_photos(items)  # {motion: photo}
+        photo_to_motion = {photo: motion for motion, photo in pairs.items()}
+        for it in items:
+            p = Path(it.path)
+            if p in pairs:                       # 动态 .mov 侧
+                it.raw.setdefault("status", "live_motion_skip")
+                it.raw["live_motion_pair"] = str(pairs[p])  # 调试/追溯用
+            elif p in photo_to_motion:           # 静态照片侧
+                it.raw["live_motion_path"] = str(photo_to_motion[p])
+            yield it
 
     # ---- 读:stat(补 ffprobe / EXIF 元数据)----
 
@@ -296,17 +359,18 @@ class LocalSource(Source):
 
         视频:`select=gt(scene,0.4)` 抽关键帧,缺帧时按 `fps=1/5` 兜底均匀采样;
             截断到 cap 张(保序均匀抽样,与 02_extract._subsample_keep_order 同思路)。
-        照片:整下后用 lib.imaging 归一化,缺工具时直接 copy。
-        缺 ffmpeg → 返 [];不抛。
+            **视频路径要求 ffmpeg**(P2-2 复审修复: 照片不与视频同 gate)。
+        照片:用 ``lib.imaging.normalize_photo`` 归一化(HEIC→JPEG + EXIF 旋正);
+            缺 PIL/缺工具时直接 copy 兑底。**不依赖 ffmpeg。**
+        缺 ffmpeg → 仅视频返 [];不抛。
         """
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self._has_ffmpeg():
-            return []
-
         path = Path(item.path)
         if item.media_type == "video":
+            if not self._has_ffmpeg():
+                return []
             return self._frames_video(path, dest_dir, cap=cap)
         if item.media_type == "photo":
             return self._frames_photo(path, dest_dir, cap=cap)
@@ -355,23 +419,34 @@ class LocalSource(Source):
         return frames
 
     def _frames_photo(self, path: Path, dest_dir: Path, *, cap: int) -> list[Path]:
-        """照片抽帧 = 整下到 dest_dir(归一化或直接 copy)。cap 视作"最多几张"。
+        """照片抽帧 = 归一化到 dest_dir(HEIC→JPEG + EXIF 旋正)。cap 视为"最多几张"。
 
-        复用了 lib.imaging 的归一化能力(HEIC→JPEG、EXIF 旋正);缺工具退化为直接 copy。
+        走 ``lib.imaging.normalize_photo``(P2-2 复审修复: 函数名修正为
+        ``normalize_photo``,原代码误调 ``normalize_photo_frame``。normalize_photo
+        内部会 register_heif + exif_transpose + 存为 RGB JPEG;缺工具时返 False。
+        任何失败均不抛,兑底为直接 copy 原图(单帧)。
         """
+        target = dest_dir / (path.stem + ".jpg")
         try:
-            from lib.imaging import normalize_photo_frame
+            from lib.imaging import normalize_photo
         except ImportError:
-            # 缺 lib.imaging → 直接 copy 兜底(仍是"一张"原图)
-            target = dest_dir / path.name
+            # 缺 lib.imaging → 直接 copy 兑底(仍是"一张"原图)
             try:
                 target.write_bytes(path.read_bytes())
+                return [target]
             except OSError:
                 return []
-            return [target]
 
         try:
-            out = normalize_photo_frame(path, dest_dir)
-            return [out] if out else []
+            ok = normalize_photo(path, target)
+            if ok and target.is_file():
+                return [target]
         except Exception:  # noqa: BLE001
+            pass
+
+        # 归一化失败 → 兑底 copy
+        try:
+            target.write_bytes(path.read_bytes())
+            return [target]
+        except OSError:
             return []
