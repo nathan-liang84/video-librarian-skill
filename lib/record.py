@@ -46,6 +46,15 @@ class Record:
     # Live Photo:照片记录指向配对的动态 .mov;该 .mov 自身记 status=live_motion_skip
     live_motion_path: Optional[str] = None
 
+    # 数据源(网盘 Phase 1):本地记录留默认(source=None ⇒ 视作 "local")。
+    # record.id 仍是内容身份(网盘记录由 remote_md5 派生);fs_id 仅网盘操作锚点,不入 id。
+    # 详见 docs/NETDISK_PIPELINE.md §2/§6。字段改动属章程 §8 契约红线,必走 Opus 评审。
+    source: Optional[str] = None          # "local"(默认/缺省) | "baidu"
+    remote_path: Optional[str] = None     # 网盘内当前路径(人读;改名/归集后会变)
+    fs_id: Optional[str] = None           # 网盘操作锚点(rename/move/copy);不是 record.id
+    remote_md5: Optional[str] = None      # filemetas md5,派生 record.id + 免下载去重
+    collected_path: Optional[str] = None  # 07_collect 归集后在网盘的路径
+
     # 照片三检(01b_photo_triage 填;视频/普通照片留默认)
     is_junk: Optional[bool] = None       # 是否判为垃圾(截图/翻拍/表情包等)
     junk_reason: Optional[str] = None    # 垃圾原因(screenshot/document/meme…)
@@ -103,6 +112,11 @@ class Record:
         老 manifest/旁车没 content_kind 字段时自动按 media_type 走,保持向后兼容。
         """
         return self.content_kind or self.media_type
+
+    @property
+    def effective_source(self) -> str:
+        """对外的数据源读取接口:显式 source 优先,缺省回退 "local"(向后兼容旧记录)。"""
+        return self.source or "local"
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Record":

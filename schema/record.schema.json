@@ -19,6 +19,12 @@
     "sprite": { "type": ["string", "null"] },
     "live_motion_path": { "type": ["string", "null"], "description": "Live Photo 配对的动态 .mov 路径;该 .mov 自身记 status=live_motion_skip" },
 
+    "source": { "type": ["string", "null"], "enum": ["local", "baidu", null], "description": "数据源:local(默认/缺省)| baidu。缺省消费者按 local 处理(见 Record.effective_source)" },
+    "remote_path": { "type": ["string", "null"], "description": "网盘内当前路径(人读;改名/归集后会变);本地记录为 null" },
+    "fs_id": { "type": ["string", "null"], "description": "百度 fs_id,网盘操作锚点(rename/move/copy 后稳定);不是 record.id" },
+    "remote_md5": { "type": ["string", "null"], "description": "filemetas 返回的 md5,用于派生 record.id + 免下载去重" },
+    "collected_path": { "type": ["string", "null"], "description": "07_collect 归集后在网盘新文件夹里的路径" },
+
     "is_junk": { "type": ["boolean", "null"], "description": "是否判为垃圾(截图/翻拍/表情包等)。01b 置 status=junk;经 05_store 入库后可能为 status=stored 且 is_junk=true —— is_junk 是 06 排除召回的持久标记" },
     "junk_reason": { "type": ["string", "null"], "description": "垃圾原因(screenshot/document/meme…)" },
     "group_id": { "type": ["string", "null"], "description": "近重复/连拍组 ID(同组共享);仅代表帧进精理解" },
