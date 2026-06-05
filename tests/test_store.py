@@ -114,7 +114,7 @@ def test_store_include_understood_validates_and_stores(tmp_path, monkeypatch):
                      "sidecar": {"output_dir": str(tmp_path / "output"),
                                  "summary_file": "_素材总表.xlsx",
                                  "media_root": str(media_dir)}},
-           "people": {"main": {"name": "寸寸"}}}
+           "people": {"main": {"name": "Alice"}}}
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
 

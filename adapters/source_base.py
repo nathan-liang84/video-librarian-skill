@@ -6,9 +6,9 @@
 
 01 起各阶段只依赖 Source 接口,不直接碰 os.walk / HTTP,从而本地与网盘共用同一条管线。
 
-实现拆分(见 docs/NETDISK_PIPELINE.md §12):
-- LocalSource  (P1-N2):把现有 01_scan 的 os.walk + ffprobe/EXIF 行为零变化包进来。
-- BaiduSource  (P1-N3/N4):xpan list/filemetas + streaming/dlink 抽帧 + filemanager 写操作。
+实现:
+- LocalSource:把现有 01_scan 的 os.walk + ffprobe/EXIF 行为零变化包进来。
+  (抽象层预留:未来可按同一接口扩展其它数据源,如云盘。)
 
 读操作(list/stat/frames)为抽象方法,任何 Source 必须实现;
 写操作(rename/mkdir/collect/put_sidecar)默认抛 NotImplementedError —— 只读阶段(Phase 1)

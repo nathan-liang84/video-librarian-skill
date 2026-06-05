@@ -18,7 +18,7 @@ NAMING = {
 }
 
 PEOPLE = {
-    "main": {"name": "寸寸"},
+    "main": {"name": "Alice"},
     "companions": [{"name": "男朋友"}, {"name": "宠物狗"}],
 }
 
@@ -41,15 +41,15 @@ def test_sanitize_removes_illegal():
 
 def test_photo_basename():
     rec = {"media_type": "photo", "shot_at": "2024-07-15T10:00:00",
-           "subjects": ["寸寸"], "scene": ["海边"]}
-    assert render_basename(rec, NAMING, 1) == "20240715_寸寸_海边_01"
+           "subjects": ["Alice"], "scene": ["海边"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_Alice_海边_01"
 
 
 def test_video_basename_with_shot_type():
     rec = {"media_type": "video", "shot_at": "2024-07-15",
-           "subjects": ["寸寸", "男朋友"], "scene": ["咖啡馆"],
+           "subjects": ["Alice", "男朋友"], "scene": ["咖啡馆"],
            "shot_type": "中景"}
-    assert render_basename(rec, NAMING, 3) == "20240715_寸寸和男朋友_咖啡馆_中景_03"
+    assert render_basename(rec, NAMING, 3) == "20240715_Alice和男朋友_咖啡馆_中景_03"
 
 
 def test_empty_people_dropped():
@@ -60,27 +60,27 @@ def test_empty_people_dropped():
 
 
 def test_missing_date_dropped():
-    rec = {"media_type": "photo", "subjects": ["寸寸"], "scene": ["海边"]}
-    assert render_basename(rec, NAMING, 1) == "寸寸_海边_01"
+    rec = {"media_type": "photo", "subjects": ["Alice"], "scene": ["海边"]}
+    assert render_basename(rec, NAMING, 1) == "Alice_海边_01"
 
 
 def test_assign_unique_increments_seq():
     recs = [
         {"id": "a", "media_type": "photo", "shot_at": "2024-07-15",
-         "subjects": ["寸寸"], "scene": ["海边"]},
+         "subjects": ["Alice"], "scene": ["海边"]},
         {"id": "b", "media_type": "photo", "shot_at": "2024-07-15",
-         "subjects": ["寸寸"], "scene": ["海边"]},
+         "subjects": ["Alice"], "scene": ["海边"]},
     ]
     names = assign_unique_names(recs, NAMING)
     assert names["a"] != names["b"]
-    assert set(names.values()) == {"20240715_寸寸_海边_01", "20240715_寸寸_海边_02"}
+    assert set(names.values()) == {"20240715_Alice_海边_01", "20240715_Alice_海边_02"}
 
 
 def test_assign_respects_taken():
     recs = [{"id": "a", "media_type": "photo", "shot_at": "2024-07-15",
-             "subjects": ["寸寸"], "scene": ["海边"]}]
-    names = assign_unique_names(recs, NAMING, taken={"20240715_寸寸_海边_01"})
-    assert names["a"] == "20240715_寸寸_海边_02"
+             "subjects": ["Alice"], "scene": ["海边"]}]
+    names = assign_unique_names(recs, NAMING, taken={"20240715_Alice_海边_01"})
+    assert names["a"] == "20240715_Alice_海边_02"
 
 
 def test_main_subject_object_when_no_person():
@@ -93,21 +93,21 @@ def test_main_subject_object_when_no_person():
 def test_main_subject_overrides_people_when_model_picks_object():
     # 模型判断主次:有人但镜头主拍物 → main_subject=物品 → 文件名用物品
     rec = {"media_type": "video", "shot_at": "2024-07-15",
-           "subjects": ["寸寸"], "main_subject": "柠檬茶", "scene": ["餐厅"]}
+           "subjects": ["Alice"], "main_subject": "柠檬茶", "scene": ["餐厅"]}
     assert render_basename(rec, NAMING, 1) == "20240715_柠檬茶_餐厅_01"
 
 
 def test_person_as_main_subject():
     rec = {"media_type": "video", "shot_at": "2024-07-15",
-           "subjects": ["寸寸"], "main_subject": "寸寸", "scene": ["海边"]}
-    assert render_basename(rec, NAMING, 1) == "20240715_寸寸_海边_01"
+           "subjects": ["Alice"], "main_subject": "Alice", "scene": ["海边"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_Alice_海边_01"
 
 
 def test_subject_falls_back_to_people_without_main_subject():
     # 模型没给 main_subject → 退回人物名册段(向后兼容)
     rec = {"media_type": "video", "shot_at": "2024-07-15",
-           "subjects": ["寸寸"], "scene": ["海边"]}
-    assert render_basename(rec, NAMING, 1) == "20240715_寸寸_海边_01"
+           "subjects": ["Alice"], "scene": ["海边"]}
+    assert render_basename(rec, NAMING, 1) == "20240715_Alice_海边_01"
 
 
 def test_long_main_subject_capped():
@@ -126,13 +126,13 @@ def test_validate_subject_kind():
 
 
 def test_roster_names_includes_specials():
-    assert roster_names(PEOPLE) == {"寸寸", "男朋友", "宠物狗", "多人", "空镜"}
+    assert roster_names(PEOPLE) == {"Alice", "男朋友", "宠物狗", "多人", "空镜"}
 
 
 def test_validate_passes_clean_record():
     rec = {"shot_type": "全景", "scene": ["海边"], "mood": ["温暖"],
            "camera_move": ["推"], "lighting": "日光",
-           "suggested_use": ["B-roll"], "subjects": ["寸寸和男朋友"],
+           "suggested_use": ["B-roll"], "subjects": ["Alice和男朋友"],
            "quality_score": 4}
     assert validate_record(rec, VOCAB, PEOPLE) == []
 

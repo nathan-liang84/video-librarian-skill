@@ -10,7 +10,7 @@ from lib.config import validate_config  # noqa: E402
 def _cfg(tmp_path: Path):
     refs_dir = tmp_path / "config" / "refs"
     refs_dir.mkdir(parents=True)
-    (refs_dir / "寸寸.jpg").write_bytes(b"img")
+    (refs_dir / "Alice.jpg").write_bytes(b"img")
     return {
         "store": {
             "mode": "sidecar",
@@ -23,7 +23,7 @@ def _cfg(tmp_path: Path):
             "asr": {"provider": "faster-whisper", "model": "small"},
         },
         "cost_tier": "quick",
-        "people": {"main": {"name": "寸寸"}},
+        "people": {"main": {"name": "Alice"}},
         "runtime": {"needs_review_confidence": 0.6, "needs_review_quality": 3},
     }, refs_dir
 
@@ -49,7 +49,7 @@ def test_validate_config_requires_feishu_credentials(tmp_path, monkeypatch):
 
 def test_validate_config_requires_main_ref_image(tmp_path, monkeypatch):
     cfg, refs_dir = _cfg(tmp_path)
-    (refs_dir / "寸寸.jpg").unlink()
+    (refs_dir / "Alice.jpg").unlink()
     monkeypatch.chdir(tmp_path)
 
     issues = validate_config(cfg)
