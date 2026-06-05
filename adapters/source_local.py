@@ -252,9 +252,11 @@ class LocalSource(Source):
 
     def _iter_media(self, root: Path) -> Iterator[SourceItem]:
         """惰性生成器:大目录不必一次读完。"""
-        # 与 01_scan.main 第一遍 rglob + is_junk_name + detect_media_type 一致;
-        # 不预排序(01_scan 内部 sorted;测试只对集合断言,顺序无关)
-        for path in root.rglob("*"):
+        # 与 01_scan.main 第一遍 rglob + is_junk_name + detect_media_type 字节对齐;
+        # 显式 sorted() 恢复稳定顺序(a.jpg 在 b.jpg 前)—— 与旧 01_scan.main()
+        # 第一遍的 `sorted(input_dir.rglob("*"))` 一致;否则 dedup 时的"留下第一个"
+        # 行为依赖文件系统,test_scan_builds_manifest_and_skips_duplicates 失败。
+        for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
             media_type = _detect_media_type(path)

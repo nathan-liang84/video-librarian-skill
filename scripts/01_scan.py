@@ -372,8 +372,14 @@ def main() -> int:
         root_path = Path(input_path)
         if not root_path.exists():
             raise FileNotFoundError(f"素材目录不存在: {input_path}")
+        # 统计被 LocalSource 内部过滤掉的系统垃圾(._资源叉 / Thumbs.db 等),
+        # 仅为 stdout 报数;LocalSource 内部已用同样的 is_junk_name 规则过滤,
+        # 不会影响 items 集合。baidu 模式无此概念(网盘没有"系统垃圾"项)→ 0。
+        junk = sum(1 for p in root_path.rglob("*")
+                   if p.is_file() and is_junk_name(p.name))
     else:
         input_path = args.input
+        junk = 0
     items = list(source.list(input_path))
 
     # 4) stat 补 ffprobe/EXIF 元数据(SourceItem.raw["stat_meta"])
@@ -419,9 +425,11 @@ def main() -> int:
             live_skipped += 1
 
     manifest.save()
-    msg = f"扫描完成: 新增 {added} 条, 跳过重复/空 id {skipped} 条"
+    msg = f"扫描完成: 新增 {added} 条, 跳过重复 {skipped} 条"
     if live_skipped:
         msg += f", Live Photo 动态分量 {live_skipped} 个(配对后不单独入库)"
+    if junk:
+        msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
     if content_kind:
         msg += f", 目录内容类型={content_kind}"
     msg += f", 数据源={args.source}"
