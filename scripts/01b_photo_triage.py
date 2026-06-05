@@ -101,21 +101,43 @@ def _reset_junk_records(manifest: Manifest) -> int:
     return n
 
 
-def _triage_one(rec: Record) -> tuple[str | None, str | None, list[dict[str, Any]]]:
-    """对单条照片记录跑三检 → 返回 (junk_reason, phash_or_None, items_for_group)。
+def _has_exif_signal(rec: Record) -> bool:
+    """最佳努力 EXIF 信号:有 ``device`` 或 ``gps`` 即视为有相机 EXIF。
 
-    不修改 record;由调用方按 junk/group 决定置什么字段。
+    ``Record`` 没有显式 ``has_exif`` 字段;01_scan 写 ``device``/``gps`` 时
+    必然带 EXIF。无此信号(``None``)→ 让 ``triage.pick_representative`` 把
+    ``has_exif`` 当作 falsy(代表选择时退而求其次按面积 / 输入顺序)。
     """
-    path = rec.path
-    resolution = rec.resolution
-    junk_reason = triage.classify_content(path, resolution=resolution)
-    phash_value = triage.phash(path)
-    item: dict[str, Any] = {
+    return bool(rec.device) or bool(rec.gps)
+
+
+def _classify_junk(rec: Record) -> str | None:
+    """【P3】先判垃圾 —— 这一步不读图、纯启发式,所有候选都跑。
+
+    垃圾不参与 pHash 分组,因此 pHash 只在非垃圾上调用(见
+    ``_build_group_item`` / main 的循环分支)。
+    """
+    return triage.classify_content(rec.path, resolution=rec.resolution)
+
+
+def _build_group_item(rec: Record) -> dict[str, Any]:
+    """【P3】仅对非垃圾调用:算 pHash + 透传选代表元数据。
+
+    透传给 ``triage.pick_representative`` 的字段:
+        - ``id``     :组员 id(回写时定位 record)
+        - ``phash``  :感知哈希(可能 None;group_near_duplicates 会自行处理)
+        - ``shot_at``:拍摄时间(供 group_near_duplicates 做时间近邻约束)
+        - ``resolution`` / ``has_exif`` 【P2】:供 ``pick_representative`` 按
+                     分辨率面积 + EXIF 排优先级;漏传则真函数退化到 manifest
+                     顺序,会导致低质量 burst 成员霸占代表位。
+    """
+    return {
         "id": rec.id,
-        "phash": phash_value,
+        "phash": triage.phash(rec.path),
         "shot_at": rec.shot_at,
+        "resolution": rec.resolution,
+        "has_exif": _has_exif_signal(rec),
     }
-    return junk_reason, phash_value, item
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,12 +161,12 @@ def main(argv: list[str] | None = None) -> int:
         manifest.save()
         return 0
 
-    # 3) 先判垃圾(垃圾不参与分组)
+    # 3) 先判垃圾(垃圾不参与分组);【P3】pHash 仅对非垃圾计算。
     junk_records: list[Record] = []
     candidate_records: list[Record] = []  # 等待分组的非垃圾照片
     candidate_items: list[dict[str, Any]] = []
     for rec in pending_photos:
-        junk_reason, phash_value, item = _triage_one(rec)
+        junk_reason = _classify_junk(rec)
         if junk_reason:
             rec.is_junk = True
             rec.junk_reason = junk_reason
@@ -155,7 +177,10 @@ def main(argv: list[str] | None = None) -> int:
             junk_records.append(rec)
         else:
             candidate_records.append(rec)
-            candidate_items.append(item)
+            # 【P3】只在非垃圾上调 phash —— 垃圾不参与分组,不付 image decode 成本。
+            # 【P2】group item 顺带透传 resolution / has_exif,供
+            # triage.pick_representative() 按面积+EXIF 选真代表。
+            candidate_items.append(_build_group_item(rec))
 
     # 4) 非垃圾 → pHash 分组(分组成 [ [member_dict,...], ... ])
     groups: list[list[dict[str, Any]]] = []

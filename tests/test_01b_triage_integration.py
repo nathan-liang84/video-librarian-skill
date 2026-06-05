@@ -190,3 +190,95 @@ def test_include_junk_reprocesses_and_recovers(tmp_path, monkeypatch):
     after = Manifest(mpath).load().get("j")
     assert after.status == "pending"
     assert after.is_junk in (None, False)
+
+
+# ---------- 6. (GPT-5.5 P2 回归) 选代表透传 resolution / has_exif ----------
+
+def test_pick_representative_prefers_higher_resolution(tmp_path, monkeypatch):
+    """【P2 回归】连拍组里【后入场的高分辨率成员】应被选为代表(而非 manifest 顺序)。
+
+    验证 01b 把 ``rec.resolution`` / ``has_exif`` 透传到 group item,这样真
+    ``triage.pick_representative()`` 才能按分辨率面积排序;否则真函数在所有
+    member ``resolution`` 都缺失时退化为输入顺序(manifest 顺序),低质量 burst
+    成员可能霸占代表位、高质量帧被标 grouped 跳过 02/03/04。
+
+    本测试【不替身 pick_representative】,让真函数跑;只替 phash/group 把两
+    张照片压进同一组。
+    """
+    # 同组两成员:low 先入 manifest(640x480),hi 后入(4032x3024)。
+    # phash 替身统一返 "g1" → 两张压进同组。
+    monkeypatch.setattr(triage, "phash", lambda p: "g1")
+    monkeypatch.setattr(triage, "classify_content", lambda *a, **k: None)
+    monkeypatch.setattr(triage, "group_near_duplicates", _fake_group)
+    # 关键:不替身 triage.pick_representative —— 让真函数按 resolution 面积挑代表
+
+    low = Record(id="low", media_type="photo", original_name="g1_low.jpg",
+                 path="/m/g1_low.jpg", status="pending", resolution="640x480")
+    hi = Record(id="hi", media_type="photo", original_name="g1_hi.jpg",
+                path="/m/g1_hi.jpg", status="pending", resolution="4032x3024")
+
+    mpath = tmp_path / "manifest.json"
+    m = Manifest(mpath).load()
+    # 注意顺序:low 先 upsert,hi 后 —— 即便 low 在前,hi 因高分辨率应胜出
+    m.upsert(low)
+    m.upsert(hi)
+    m.save()
+    mod = _load(f"triage01b_p2_{tmp_path.name}", "scripts/01b_photo_triage.py")
+    monkeypatch.setattr(sys, "argv", ["01b_photo_triage.py", "--manifest", str(mpath)])
+    assert mod.main() == 0
+
+    after = Manifest(mpath).load()
+    low_after = after.get("low")
+    hi_after = after.get("hi")
+    assert hi_after.is_representative is True   # 高分辨率胜出
+    assert low_after.is_representative is False  # 低分辨率沦为成员
+    assert low_after.status == "grouped"
+    assert hi_after.status == "pending"
+    assert hi_after.group_id is not None
+    assert low_after.group_id == hi_after.group_id
+    assert hi_after.group_size == 2
+    assert low_after.group_size == 2
+
+
+# ---------- 7. (GPT-5.5 P3 回归) 垃圾不调 phash ----------
+
+def test_junk_records_skip_phash(tmp_path, monkeypatch):
+    """【P3 回归】垃圾照片【不应】触发 ``triage.phash()`` 调用。
+
+    合同:先判垃圾,垃圾不参与 pHash 分组。早期实现无差别调 phash,
+    截图/文档/表情包白白付 image decode 成本。本测试把 ``triage.phash``
+    替成一个【任何调用都会抛 AssertionError】的函数,然后只放垃圾样本
+    跑 01b;只要 01b 调一次 phash,异常会顶到 ``main()`` 返回非 0,
+    测试失败。
+    """
+    # 所有记录都判为垃圾(classify 替身);phash 替成会爆炸的函数
+    monkeypatch.setattr(triage, "classify_content",
+                        lambda path, *a, **k: "screenshot")
+    monkeypatch.setattr(triage, "group_near_duplicates", _fake_group)
+    monkeypatch.setattr(triage, "pick_representative", _fake_pick)
+
+    def _phash_should_not_run(path):
+        raise AssertionError(
+            f"triage.phash() 在垃圾照片上被调用 (path={path});"
+            "P3 修复:仅非垃圾才调 phash。"
+        )
+    monkeypatch.setattr(triage, "phash", _phash_should_not_run)
+
+    recs = [
+        Record(id="ss1", media_type="photo", original_name="screenshot_a.png",
+               path="/m/screenshot_a.png", status="pending"),
+        Record(id="ss2", media_type="photo", original_name="screenshot_b.png",
+               path="/m/screenshot_b.png", status="pending"),
+    ]
+    mpath = tmp_path / "manifest.json"
+    m = Manifest(mpath).load()
+    for r in recs:
+        m.upsert(r)
+    m.save()
+    mod = _load(f"triage01b_p3_{tmp_path.name}", "scripts/01b_photo_triage.py")
+    monkeypatch.setattr(sys, "argv", ["01b_photo_triage.py", "--manifest", str(mpath)])
+    # 若 01b 误调 phash,_phash_should_not_run 会 AssertionError → main 返非 0 → 失败。
+    assert mod.main() == 0
+    after = Manifest(mpath).load()
+    assert after.get("ss1").status == "junk"
+    assert after.get("ss2").status == "junk"
