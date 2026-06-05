@@ -8,7 +8,14 @@
 - id = 文件内容 SHA1 前16位(大文件可分块哈希)。同 id 视为重复,跳过。
 - 视频用 ffprobe 取 时长/分辨率/fps/codec/创建时间/GPS;照片读 EXIF(拍摄时间/设备/GPS)。
 - 每个文件 upsert 一条 status=pending 的 Record 到 manifest。
+
+P1-N5 集成层(Atlas 2026-06-05):加 --source 开关 + 暴露 build_source / record_from_item 两个
+工厂/转换函数,让本地与网盘走同一条管线。改顶部加 from __future__ import annotations 以
+兼容 Python 3.9(本文件多个签名用了 str|None 联合类型;下游为本地或网盘记录,
+build_source 返回的 Source.list() 产出交由 record_from_item 转 Record 后 upsert 到 manifest)。
 """
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -243,10 +250,100 @@ def build_record(path: Path, media_type: str, *,
     )
 
 
+# ---------- P1-N5 集成层(Atlas) ----------
+
+def build_source(cfg: dict[str, Any], source: str | None = None) -> Any:
+    """按 cfg/source 名构造一个 Source 适配器。
+
+    source 为 None 时,读 ``cfg["source"]["type"]``;为 "local" → ``LocalSource()``;
+    为 "baidu" → ``BaiduSource(cred_path=cfg["source"]["baidu"]["cred_path"])``。
+    显式传 source 优先于 cfg(供 run_all 等场景覆盖)。
+
+    返回: ``Source`` 子类实例(LocalSource / BaiduSource)。
+    凭据路径必为本地文件;运行期不在仓内(Phase 1 默认
+    ``~/.config/video-librarian/baidu_credentials.json``)。
+    """
+    chosen = source or (cfg.get("source", {}) or {}).get("type") or "local"
+
+    if chosen == "local":
+        from adapters.source_local import LocalSource  # noqa: WPS433
+        return LocalSource()
+
+    if chosen == "baidu":
+        from adapters.source_baidu import BaiduSource  # noqa: WPS433
+        baidu_cfg = (cfg.get("source", {}) or {}).get("baidu", {}) or {}
+        cred_path = baidu_cfg.get("cred_path")
+        if not cred_path:
+            raise ValueError(
+                "build_source(baidu): cfg['source']['baidu']['cred_path'] 必填 "
+                "(默认 ~/.config/video-librarian/baidu_credentials.json)"
+            )
+        return BaiduSource(cred_path=cred_path)
+
+    raise ValueError(f"未知数据源: {chosen!r}(仅支持 'local' / 'baidu')")
+
+
+def record_from_item(item: Any, *, source: str) -> Any:
+    """从 SourceItem 构建 Record。**传播**所有上游给到的字段:
+
+    - id:``item.record_id``(本地 sha1[:16] / 网盘 md5[:16])
+    - media_type:item.media_type
+    - source:调用方传入的源名("local" / "baidu")
+    - remote_path:item.remote_path
+    - fs_id:item.fs_id
+    - remote_md5:item.content_md5
+    - shot_at:item.shot_at
+    - raw["stat_meta"] 的 resolution/fps/codec/duration_sec/device → Record 对应字段
+    - raw["status"]=="live_motion_skip" → Record.status(默认 "pending")
+    - raw["live_motion_path"] → Record.live_motion_path
+
+    路径 / original_name:从 item.path 取。LocalSource 已是绝对路径(零行为变化);
+    BaiduSource 的 item.path 为远端路径,原样存入 Record.path —— 但旁车落本地按 id
+    走(见 SidecarAdapter 的非 local 分支)。
+
+    不写 Record.content_kind(那是 #29 目录级字段,01_scan 后续会基于
+    ``types_seen`` 聚合写入,不在这里管)。
+    """
+    stat_meta = (item.raw or {}).get("stat_meta", {}) or {}
+    raw_status = (item.raw or {}).get("status")
+    status = "live_motion_skip" if raw_status == "live_motion_skip" else "pending"
+
+    # 路径:本地为绝对路径,网盘为远端路径 —— 原样存,让 SidecarAdapter 自己
+    # 按 source 决定落点(网盘记录不依赖 path 推算本地落点,按 record.id 走)。
+    path = item.path or ""
+    original_name = Path(path).name if path else ""
+
+    # remote_md5:item.content_md5 是 32 字符 hex;Record.remote_md5 期望同长。
+    remote_md5 = item.content_md5 if item.content_md5 else None
+
+    return Record(
+        id=item.record_id or "",
+        media_type=item.media_type,
+        original_name=original_name,
+        path=path,
+        status=status,
+        source=source,
+        remote_path=item.remote_path,
+        fs_id=item.fs_id,
+        remote_md5=remote_md5,
+        # 原始元数据(raw["stat_meta"])透传到 Record 对应字段
+        resolution=stat_meta.get("resolution"),
+        fps=stat_meta.get("fps"),
+        codec=stat_meta.get("codec"),
+        duration_sec=stat_meta.get("duration_sec"),
+        device=stat_meta.get("device"),
+        # Live Photo 配对传播
+        live_motion_path=(item.raw or {}).get("live_motion_path"),
+        shot_at=item.shot_at,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, help="素材目录")
     ap.add_argument("--manifest", default="state/manifest.json")
+    ap.add_argument("--source", choices=["local", "baidu"], default="local",
+                    help="数据源:local=本地目录(默认),baidu=百度网盘(需 cfg[source][baidu][cred_path])")
     args = ap.parse_args()
 
     manifest = Manifest(Path(args.manifest)).load()

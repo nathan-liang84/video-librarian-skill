@@ -2,10 +2,18 @@
 """阶段0:环境自检。检查 ffmpeg/ffprobe、Python 依赖、配置、数据层凭证是否就绪。
 
 缺什么报清楚 + 怎么装,绝不静默。负责人:GPT-5.4(可在此骨架上扩展)。
+
+P1-N5 集成层(Atlas 2026-06-05):加 ``probe_baidu_token(cred_path) -> dict`` 检查百度网盘
+凭证是否就绪(return 至少含 bool 'ok')。顶部加 ``from __future__ import annotations``
+兼容 Python 3.9(本文件多个签名用了 str|None 联合类型;探测在仓外凭证,返回
+guidance 文本给 run_all / 用户重新授权)。
 """
+from __future__ import annotations
+
 import platform
 import shutil
 import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -103,6 +111,52 @@ def main() -> int:
     all_ok = all(bins) and all(deps) and cfg_ok and not config_issues
     print("\n结果:", "全部就绪 ✓" if all_ok else "存在缺失,请按上面提示处理 ✗")
     return 0 if all_ok else 1
+
+
+# ---------- P1-N5 集成层(Atlas):百度网盘 token 探测 ----------
+
+_BAIDU_REAUTH_HINT = (
+    "运行 baidu_oauth_setup.py 设备码授权获取 access_token + refresh_token,"
+    "保存到 ~/.config/video-librarian/baidu_credentials.json(600 权限)"
+)
+
+
+def probe_baidu_token(cred_path: str | Path) -> dict[str, Any]:
+    """检查百度网盘凭证是否就绪。
+
+    返回 dict,至少含布尔键 ``ok``(验收契约):
+        - ok=True  → 有 access_token,可用
+        - ok=False → 文件缺失 / 解析失败 / 缺 access_token,需重新授权
+
+    额外提供 ``message``(状态描述)与 ``guide``(重新授权指引)便于调用方展示。
+    不抛异常;所有错误均以 ok=False 表达。
+    """
+    path = Path(cred_path)
+    if not path.exists():
+        return {
+            "ok": False,
+            "message": f"百度网盘凭证文件不存在: {path}",
+            "guide": _BAIDU_REAUTH_HINT,
+        }
+    try:
+        cred = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return {
+            "ok": False,
+            "message": f"凭证文件解析失败: {exc}",
+            "guide": _BAIDU_REAUTH_HINT,
+        }
+    if not isinstance(cred, dict) or not cred.get("access_token"):
+        return {
+            "ok": False,
+            "message": "凭证缺 access_token,需重新授权",
+            "guide": _BAIDU_REAUTH_HINT,
+        }
+    return {
+        "ok": True,
+        "message": "百度网盘 token 可用",
+        "cred_path": str(path),
+    }
 
 
 if __name__ == "__main__":
