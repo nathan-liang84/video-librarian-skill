@@ -154,21 +154,56 @@ def test_video_frames_transcode_not_ready_falls_back_to_thumb(tmp_path):
     assert out[0].name.endswith("_cover.jpg")
 
 
+def test_streaming_raw_m3u8_text(tmp_path):
+    """真机形态:streaming 直接返回 #EXTM3U 文本(非 JSON)→ 必须识别为播放列表。"""
+    src = BaiduSource(_cred(tmp_path))
+    from adapters.source_base import SourceItem
+    it = SourceItem(path="/r/v.mp4", media_type="video", fs_id="20")
+    calls = {"n": 0}
+
+    def fake_text(url):
+        calls["n"] += 1
+        return "#EXTM3U\n#EXT-X-TARGETDURATION:10\nhttps://seg/0.ts\n"
+    src._http_get_text = fake_text
+    m3u8 = src._streaming_m3u8(it, retries=3, backoff=0.0)
+    assert m3u8 is not None and m3u8.startswith("#EXTM3U")
+    assert calls["n"] == 1               # 文本一次到位,不再走 JSON 分支
+
+
 def test_streaming_retries_on_31341(tmp_path, monkeypatch):
-    """_streaming_m3u8 遇 31341 退避重试,最终拿到 M3U8。"""
+    """31341 转码未就绪(JSON 错误体)→ 退避重试,最终拿到 M3U8 文本。"""
     src = BaiduSource(_cred(tmp_path))
     from adapters.source_base import SourceItem
     it = SourceItem(path="/r/v.mp4", media_type="video", fs_id="13")
-    seq = [{"errno": sb._TRANSCODE_NOT_READY},
-           {"errno": sb._TRANSCODE_NOT_READY},
-           {"errno": 0, "m3u8": "#EXTM3U\n"}]
+    seq = [json.dumps({"errno": sb._TRANSCODE_NOT_READY}),
+           json.dumps({"errno": sb._TRANSCODE_NOT_READY}),
+           "#EXTM3U\n"]
     calls = {"n": 0}
 
-    def fake(base, params, *, where):
+    def fake_text(url):
         i = calls["n"]; calls["n"] += 1
         return seq[i]
-    src._http_get_json = fake
+    src._http_get_text = fake_text
     monkeypatch.setattr(sb.time, "sleep", lambda *_: None)   # 不真等
     m3u8 = src._streaming_m3u8(it, retries=3, backoff=0.0)
     assert m3u8 == "#EXTM3U\n"
     assert calls["n"] == 3
+
+
+def test_streaming_adtoken_two_step(tmp_path):
+    """首个响应是带 adToken 的 JSON → 带 adToken 二次请求拿到 M3U8 文本。"""
+    src = BaiduSource(_cred(tmp_path))
+    from adapters.source_base import SourceItem
+    it = SourceItem(path="/r/v.mp4", media_type="video", fs_id="21")
+    seen = []
+
+    def fake_text(url):
+        seen.append(url)
+        if "adToken" in url:
+            return "#EXTM3U\n#EXT-X-ENDLIST\n"
+        return json.dumps({"errno": 0, "adToken": "ADT123"})
+    src._http_get_text = fake_text
+    m3u8 = src._streaming_m3u8(it, retries=2, backoff=0.0)
+    assert m3u8 is not None and m3u8.startswith("#EXTM3U")
+    assert len(seen) == 2                       # 两步:无 token → 带 adToken
+    assert "adToken=ADT123" in seen[1]

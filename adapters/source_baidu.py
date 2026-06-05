@@ -122,6 +122,12 @@ class BaiduSource(Source):
         with urllib.request.urlopen(req, timeout=120) as r:
             return r.read()
 
+    def _http_get_text(self, url: str) -> str:
+        """取响应原文(streaming 成功时直接返回 #EXTM3U 文本,非 JSON)。"""
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read().decode("utf-8", "replace")
+
     def _run_ffmpeg(self, args: list[str]) -> int:
         return subprocess.run(["ffmpeg", *args],
                               stdout=subprocess.DEVNULL,
@@ -251,36 +257,53 @@ class BaiduSource(Source):
         # 用 HLS 播放列表为输入,均匀抽 cap 帧;只拉所需分片,不下整片
         rc = self._run_ffmpeg([
             "-y", "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-            "-i", str(playlist), "-vf", f"thumbnail,fps=1/10",
+            "-i", str(playlist), "-vf", "thumbnail,fps=1/10",
             "-frames:v", str(cap), pattern,
         ])
         if rc != 0:
             return self._thumb_fallback(item, dest_dir)
         return sorted(dest_dir.glob("frame_*.jpg"))
 
-    def _streaming_m3u8(self, item: SourceItem, *, retries: int, backoff: float) -> Optional[str]:
+    def _streaming_url(self, item: SourceItem, *, vtype: str,
+                       ad_token: Optional[str] = None) -> str:
+        params = {"method": "streaming", "access_token": self.ensure_token(),
+                  "path": item.path, "type": vtype}
+        if ad_token:
+            params["adToken"] = ad_token
+        return _FILE + "?" + urllib.parse.urlencode(params)
+
+    def _streaming_m3u8(self, item: SourceItem, *, retries: int, backoff: float,
+                        vtype: str = "M3U8_AUTO_720") -> Optional[str]:
+        """取视频 HLS 播放列表(M3U8 文本)。
+
+        真机实测:成功时百度**直接返回 `#EXTM3U` 文本**(Content-Type application/x-mpegURL),
+        **不是 JSON**;失败/未就绪时返回 JSON 错误体(如 errno=31341)。少数情况首个响应是带
+        `adToken` 的 JSON,需要带 adToken 二次请求才拿到 M3U8。故:取**原文** → 嗅探首行。
+        """
         for attempt in range(retries):
             try:
-                data = self._http_get_json(_FILE, {
-                    "method": "streaming", "access_token": self.ensure_token(),
-                    "path": item.path, "type": "M3U8_AUTO_720",
-                }, where="streaming")
+                text = self._http_get_text(self._streaming_url(item, vtype=vtype))
             except Exception:
+                text = ""
+            if text.lstrip().startswith("#EXTM3U"):
+                return text
+            # 非 M3U8 → 多半是 JSON 错误体(只在该分支吞解析错,其它异常不掩盖)
+            try:
+                data = json.loads(text) if text.strip() else {}
+            except (json.JSONDecodeError, ValueError):
                 data = {}
-            # 成功时百度返回 M3U8 文本;封装层可能给 {"errno":..} 或直接文本
-            if isinstance(data, dict):
-                errno = data.get("errno")
-                if errno == _TRANSCODE_NOT_READY:
-                    time.sleep(backoff * (attempt + 1))
-                    continue
-                m3u8 = data.get("m3u8") or data.get("adToken") and None
-                if m3u8:
-                    return m3u8
-                # 某些封装把 M3U8 放在 'result' / 文本
-                if isinstance(data.get("result"), str) and "#EXTM3U" in data["result"]:
-                    return data["result"]
-            elif isinstance(data, str) and "#EXTM3U" in data:
-                return data
+            if data.get("errno") == _TRANSCODE_NOT_READY:
+                time.sleep(backoff * (attempt + 1))
+                continue
+            ad = data.get("adToken")
+            if ad:
+                try:
+                    text2 = self._http_get_text(
+                        self._streaming_url(item, vtype=vtype, ad_token=ad))
+                except Exception:
+                    text2 = ""
+                if text2.lstrip().startswith("#EXTM3U"):
+                    return text2
             time.sleep(backoff * (attempt + 1))
         return None
 
