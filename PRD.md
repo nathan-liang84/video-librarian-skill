@@ -179,6 +179,11 @@ video-librarian-skill/
 | 识别 | `new_name` | string | 规范化新文件名(简短) |
 | 识别 | `path` | string | 当前路径 / 云盘相对路径 |
 | 识别 | `thumbnail` | string | 缩略图路径 / 附件(视频含雪碧图) |
+| 数据源 | `source` | enum | **网盘 Phase 1 新增**:`local`(默认/缺省)/ `baidu`;缺省按 local 处理(`Record.effective_source`) |
+| 数据源 | `remote_path` | string | 网盘内当前路径(人读;改名/归集后会变);本地记录 null |
+| 数据源 | `fs_id` | string | 百度 `fs_id`,网盘操作锚点(改名/移动后稳定);**不是** `record.id` |
+| 数据源 | `remote_md5` | string | filemetas md5,**派生 `record.id`** + 免下载去重 |
+| 数据源 | `collected_path` | string | `07_collect` 归集后在网盘的路径 |
 | 技术 | `duration_sec` | number | 时长(视频) |
 | 技术 | `resolution` | string | 如 `3840x2160` |
 | 技术 | `fps` | number | 帧率(视频) |
