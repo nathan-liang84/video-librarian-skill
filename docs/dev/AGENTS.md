@@ -1,14 +1,14 @@
 # AGENTS.md — 给 AI 协作者的入口
 
-> 任何 AI 协作者(尤其 Codex / GPT-5.4)进入本仓库,**先读这里,再读 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)**。
+> 任何 AI 协作者(尤其 Codex / GPT-5.4)进入本仓库,**先读这里,再读 [TASK_BREAKDOWN.md](TASK_BREAKDOWN.md)**。
 
 ## 这是什么
 
-VideoLibrarian:跨平台视频/照片素材整理 Skill。管线见 [README.md](README.md),需求见 [PRD.md](PRD.md)。
+VideoLibrarian:跨平台视频/照片素材整理 Skill。管线见 [README.md](../../README.md),需求见 [PRD.md](../../PRD.md)。
 
 ## 你的分工
 
-完整分工表在 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。简版:
+完整分工表在 [TASK_BREAKDOWN.md](TASK_BREAKDOWN.md)。简版:
 
 - **Opus 4.8** 负责:`lib/naming.py`、`lib/validate.py`、`lib/models.py`、`prompts/`、`scripts/03_understand.py`、`scripts/04_tag_name.py`、`scripts/06_match.py`(均已落地初版)。
 - **GPT-5.4(你)** 负责:`lib/config.py`(validate_config)、`scripts/01_scan.py`、`scripts/02_extract.py`、`adapters/*`、`scripts/05_store.py`、`scripts/run_all.py`、各自模块测试。

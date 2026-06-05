@@ -14,7 +14,7 @@ store:
     app_secret: ""         # App Secret(机密)
     app_token: ""          # 多维表格 app_token(Base)
     table_id: ""           # 素材库表 table_id
-    # 所需权限见 docs/TASK_BREAKDOWN.md 飞书章节
+    # 所需权限见 docs/dev/TASK_BREAKDOWN.md 飞书章节
 
 # ── 模型(provider 无关:任何 OpenAI 兼容服务都可用)─────────
 # 安装 skill 后建议由配置引导(见 SKILL.md)带你选择并填写。

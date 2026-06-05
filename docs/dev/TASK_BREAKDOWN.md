@@ -2,7 +2,7 @@
 
 本仓库由多模型协作开发。分工原则:**高难度/需规划推理的部分给 Opus 4.8;常规开发给 GPT-5.4(Codex);代码检查交叉进行——任何人写的都不由自己终审。**
 
-> 配套文档:产品需求 [PRD.md](../PRD.md) · 技能说明 [SKILL.md](../SKILL.md) · 数据契约 [schema/record.schema.json](../schema/record.schema.json)
+> 配套文档:产品需求 [PRD.md](../../PRD.md) · 技能说明 [SKILL.md](../../SKILL.md) · 数据契约 [schema/record.schema.json](../../schema/record.schema.json)
 
 ## 角色与职责
 
