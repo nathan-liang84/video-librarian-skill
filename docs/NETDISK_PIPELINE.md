@@ -228,3 +228,44 @@ source:
 skill 运行时**尽量不把文件名/路径/内容打印到日志或对话**;必须展示时脱敏(如只显计数、或 `…/<hash>`)。审查/调试输出同样适用。
 
 > 落地拆分见 COLLAB 隐私基线 issue(root 必填校验 + exclude 过滤 + 脱敏 helper + 知情确认),依赖 Phase 1 接线(#11)后叠加实现。
+
+---
+
+## 14. v0.2.0 实现规格(账号制核心闭环 — 2026-06-06 定稿)
+
+> **范围确认(与用户)**:**不做分享链接**(转存/分享态推迟)。v0.2.0 = 读取**用户自己**百度网盘的**指定文件夹** → 对其中视频/照片提取生成文档 → **给网盘原文件改名** → 按拍摄脚本 + 生成档案筛选视频 → **服务端归集打包到新文件夹交付用户**。**含改名(Phase 2 写回)**。
+
+### 14.1 目标工作流 → 阶段映射
+
+| 用户要的 | 阶段 | 现状 |
+|---|---|---|
+| ① 读自己网盘指定文件夹 | `01 --source baidu` | ✅ 已建(`BaiduSource.list/stat`),未合 main |
+| ② 提取视频+照片 → 生成文档 | `02 抽帧(HLS)→ 03 理解 → 05 本地旁车+总表` | ✅ 已建(`frames` + #39 接线),未合 main |
+| ③ 给原文件改名 | `04 改名` + `BaiduSource.rename` | ❌ **写操作未实现** |
+| ④ 按脚本+档案筛选 | `06 match`(script-matcher) | ✅ 已在 main,与数据源无关 |
+| ⑤ 归集打包到新文件夹交付 | `07_collect` + `BaiduSource.mkdir/collect` | ❌ **07 未建 + 写操作未实现** |
+
+> 核心缺口:`BaiduSource` 只实现了**读**(list/stat/frames),**写**(mkdir/collect/rename/put_sidecar)是空的;`scripts/07_collect.py` 不存在。Phase 0 已实测建夹 + 跨目录 copy/move + rename 全部 `errno=0`,**接口通、代码缺**。
+
+### 14.2 构建清单(每项独立 PR,沿用现有流水线)
+
+- **A · 落地读取基座**:合并 `feat/netdisk-baidu`(BaiduSource 读)+ 复活 PR #39 接线 → main。以此为 v0.2.0 起点(同时让公共仓库带上通用百度适配)。主要是合并 + 冲突解决。
+- **B · `BaiduSource` 写操作**:实现 `Source` 抽象已声明但 BaiduSource 未覆盖的四法:
+  - `mkdir(path) -> str`:`file?method=create&isdir=1`
+  - `collect(items, dest_dir, *, move=False) -> int`:`filemanager&opera=copy|move`(服务端跨目录,零带宽)
+  - `rename(item, new_name) -> bool`:`filemanager&opera=rename`
+  - `put_sidecar(item, payload) -> bool`:三步上传(`precreate→superfile2→create`),默认 **false**(隐私基线 §13.2-5)
+- **C · `scripts/07_collect.py`(新建)**:读 `06 match` 结果 → `mkdir` 建交付夹 → `collect` 归集选中视频 → **缺文件报告** + **本地下发兜底** + **默认 dry-run**(§13.2-6)。
+- **D · 端到端 E2E**:寸寸真实文件夹 + 拍摄脚本 → 全链路(读→文档→改名→筛选→归集)→ 九金 mac-mini QA(测试视频已到位)→ tag `v0.2.0`。
+
+### 14.3 安全/隐私门槛(实现必须带,见 §13.2)
+
+- `source.baidu.root` **必填**,空或 `/` 拒跑;运行前知情确认(将处理 /X 下 N 个文件)。
+- 写操作(改名/归集)**默认 dry-run** + `rename_log` 可回滚;`put_sidecar` 默认 false。
+- token 仅本地 600 文件,不进 git/日志/回显;临时帧用完即删。
+
+### 14.4 验收
+
+- B/C 各带单测(mock HTTP,覆盖 errno 异常 / dry-run / 缺文件报告)。
+- D 真机:一个指定文件夹端到端产出「本地总表(记 remote_path/fs_id/md5)+ 网盘交付夹(选中视频已 copy/move 进去)+ 原文件已改名」。
+
