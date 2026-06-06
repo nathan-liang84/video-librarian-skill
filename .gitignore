@@ -37,3 +37,7 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# 内部协作上下文(含 hub 端点 / Tailscale IP / agent 名,切勿开源)
+CLAUDE.md
+.claude/

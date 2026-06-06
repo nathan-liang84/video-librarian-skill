@@ -1,4 +1,4 @@
-"""lib.triage 单元测试。负责人:Atlas(机械层)。
+"""lib.triage 单元测试。
 
 覆盖:
 - classify_content:路径关键词 / 屏幕尺寸 / 无 EXIF / 缺信息 / 不读图(返回 junk_reason|None)
@@ -68,7 +68,7 @@ def test_classify_photo_by_default():
 def test_classify_screenshot_by_path_token():
     """路径含 Screenshot/截屏 → screenshot(强信号,不依赖 EXIF)。"""
     cases = [
-        "/Users/nate/Pictures/Screenshot 2026-01-01 at 10.00.00.png",
+        "/Users/example/Pictures/Screenshot 2026-01-01 at 10.00.00.png",
         "/sdcard/截屏/屏幕截图.png",
         "/photos/screen shot.png",
     ]

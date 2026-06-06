@@ -1,8 +1,8 @@
-"""P1b-C 验收测试(Opus 出题):scripts/01b_photo_triage.py 集成行为。
+"""P1b-C 验收测试:scripts/01b_photo_triage.py 集成行为。
 
-测试先行 —— Atlas 实现到 `pytest -q` 全绿,**不得删改/弱化**(改了视为不通过)。
+测试先行 —— 实现到 `pytest -q` 全绿,**不得删改/弱化**(改了视为不通过)。
 
-接口约定(Atlas 实现须满足):
+接口约定(实现须满足):
 - `scripts/01b_photo_triage.py` 暴露 `main() -> int`(成功返 0)。
 - argparse:`--manifest`(默认 state/manifest.json)、`--include-junk`(flag)。**不需要 --config。**
 - 只处理 `media_type=="photo"` 且 `status=="pending"` 的记录;其它(视频、非 pending)一律不动。
