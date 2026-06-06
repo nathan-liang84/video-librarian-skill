@@ -342,6 +342,49 @@ def record_from_item(item: Any, *, source: str) -> Any:
     )
 
 
+def _validate_baidu_scope(input_path: str, cfg: dict[str, Any], *,
+                          opt_in: bool) -> str:
+    """P1 防御(PR #44): 校验 --input 必须在 cfg[source][baidu][root] 范围内。
+
+    - 缺 cfg[source][baidu][root] → 报错(让用户到 config.yaml 配)
+    - input_path == "/" 或空 → 报错(明显误命令)
+    - input_path 不在 scope 内 (root 或 root 的子路径) → 报错
+    - opt_in=True → 跳过 scope check(depth / item cap 仍由 BaiduSource 守住)
+
+    返回: 规范化后的 input_path(去尾斜杠,保证与 cfg[source][baidu][root] 比对一致)。
+    """
+    baidu_cfg = (cfg.get("source", {}) or {}).get("baidu", {}) or {}
+    scope_root = (baidu_cfg.get("root") or "").rstrip("/")
+    normalized = (input_path or "").rstrip("/") or "/"
+
+    if opt_in:
+        # 用户明示:跳过 scope check(但仍提示 scope 以便追溯)
+        if scope_root:
+            print(f"  (提示:--i-know-what-im-doing 已设,跳过 scope check;"
+                  f"当前 baidu scope = {scope_root!r})")
+        return normalized
+
+    if not scope_root:
+        raise ValueError(
+            "baidu 模式必须配置 cfg[source][baidu][root](网盘侧授权子路径, 如 /素材集)。"
+            "请在 config/config.yaml 配上后重跑;若要绕过,加 --i-know-what-im-doing。"
+        )
+
+    if normalized == "/" or normalized == "":
+        raise ValueError(
+            f"--input '/' 不合法(会扫整个云盘)。"
+            f"请用具体子路径,如 --input {scope_root}/海边"
+        )
+
+    # 必须在 scope_root 或其子路径下
+    if normalized != scope_root and not normalized.startswith(scope_root + "/"):
+        raise ValueError(
+            f"--input {normalized!r} 不在 baidu scope {scope_root!r} 内。"
+            f"请用 scope 内的子路径,或在 config.yaml 调整 root,或加 --i-know-what-im-doing 绕过。"
+        )
+    return normalized
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True,
@@ -351,6 +394,9 @@ def main() -> int:
                     help="数据源:local=本地目录(默认),baidu=百度网盘(需 cfg[source][baidu][cred_path])")
     ap.add_argument("--config", default="config/config.yaml",
                     help="配置文件(baidu 源从中读 cred_path)")
+    ap.add_argument("--i-know-what-im-doing", action="store_true",
+                    help="baidu 模式:跳过 --input scope 校验(谨慎使用;"
+                         "depth / item cap 仍由 BaiduSource 守住)")
     args = ap.parse_args()
 
     # 1) 加载 cfg(baidu 需要 cred_path;local 不用,加载失败也接受)
@@ -363,10 +409,19 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             cfg = {}
 
-    # 2) 工厂造 Source(本地/网盘)
+    # 2) baidu 模式先做 scope 校验(防 --input / 扫整个云盘);必须在 build_source
+    # 之前 —— build_source 会因 cfg 缺 cred_path 而 raise,scope check 永远到不了。
+    # 校验通过后用规范化 path(去尾斜杠)喂给 source.list;local 模式不需要这一步。
+    baidu_input = ""
+    if args.source == "baidu":
+        baidu_input = _validate_baidu_scope(
+            args.input, cfg, opt_in=args.i_know_what_im_doing,
+        )
+
+    # 3) 工厂造 Source(本地/网盘)
     source = build_source(cfg, source=args.source)
 
-    # 3) 枚举素材(local 需传绝对路径;网盘传原始路径)
+    # 4) 枚举素材(local 需传绝对路径;网盘传规范化后的 path)
     if args.source == "local":
         input_path = str(Path(args.input).resolve())
         root_path = Path(input_path)
@@ -378,7 +433,8 @@ def main() -> int:
         junk = sum(1 for p in root_path.rglob("*")
                    if p.is_file() and is_junk_name(p.name))
     else:
-        input_path = args.input
+        # baidu 模式:input_path 已在 #2 规范化(去尾斜杠、scope 校验)
+        input_path = baidu_input
         junk = 0
     items = list(source.list(input_path))
 

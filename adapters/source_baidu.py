@@ -43,6 +43,14 @@ _LISTALL_LIMIT = 1000
 _FILEMETAS_CHUNK = 100
 _TRANSCODE_NOT_READY = 31341      # streaming:百度尚未转码,需重试退避
 
+# P1 防御(PR #44 GPT-5.5 复审): 限制 baidu list 避免误命令扫整个云盘。
+# - BAIDU_MAX_DEPTH: 限制递归深度(item.path 以 root 为起点的 '/' 段数)。
+#   百度 listall API 的 recursion=1 是服务端整棵子树翻页,深度在客户端按 path 段数裁剪。
+# - BAIDU_MAX_ITEMS: 限制单次 list 返回的累计 item 数,超过 raise,提示用户缩小 scope。
+# 这两个是安全护栏,不是性能调优;用户不需要改(若需可在 config.yaml 覆盖,本 PR 暂不开放)。
+BAIDU_MAX_DEPTH = 10
+BAIDU_MAX_ITEMS = 10000
+
 
 class BaiduError(RuntimeError):
     def __init__(self, errno: int, where: str):
@@ -156,9 +164,18 @@ class BaiduSource(Source):
     # ---------------- 读:list / stat ----------------
 
     def list(self, root: str) -> Iterable[SourceItem]:
-        """递归枚举 root 下素材;批量 filemetas 补 md5/size,record.id 可立即由 md5 派生。"""
+        """递归枚举 root 下素材;批量 filemetas 补 md5/size,record.id 可立即由 md5 派生。
+
+        P1 防御(PR #44):
+        - depth cap: 按 item.path 相对 root 的 '/' 段数过滤,超 BAIDU_MAX_DEPTH 的项**丢弃**
+          (注意:不是 raise,因为 _listall 已经成功返回,只是部分项太深)。
+          深度计算: ``item_depth = path.count('/') - root.count('/')``。
+        - 不在此处做 item cap(item cap 在 _listall 内 raise);此处只裁深。
+        """
         raw_files = self._listall(root)
         items: list[SourceItem] = []
+        root_depth = root.count("/")
+        dropped_depth = 0
         for f in raw_files:
             if f.get("isdir"):
                 continue
@@ -166,13 +183,23 @@ class BaiduSource(Source):
             mt = _media_type(name)
             if mt is None:
                 continue
+            # 深度过滤:相对 root 的段数
+            item_path = f.get("path", "") or ""
+            depth = item_path.count("/") - root_depth
+            if depth > BAIDU_MAX_DEPTH:
+                dropped_depth += 1
+                continue
             items.append(SourceItem(
-                path=f.get("path", ""), media_type=mt,
+                path=item_path, media_type=mt,
                 size=int(f.get("size", 0) or 0),
                 fs_id=str(f.get("fs_id", "")) or None,
-                remote_path=f.get("path"),
+                remote_path=item_path,
                 raw={"listall": f},
             ))
+        if dropped_depth:
+            # 警告但不让其拦下整次扫描(stdout 也不报,只 log;item cap 在 _listall 内 raise)
+            print(f"  (提示:忽略 {dropped_depth} 个深度 > {BAIDU_MAX_DEPTH} 的素材)"
+                  f" → 收窄 --input 范围或调整 cfg[source][baidu][root] 重新跑")
         self._fill_md5(items)
         return items
 
@@ -186,6 +213,14 @@ class BaiduSource(Source):
             }, where="listall")
             batch = data.get("list", []) or []
             out.extend(batch)
+            # P1 防御(PR #44):item cap 硬上限,超过 raise 提示用户缩小 scope。
+            # 不静默截断(让用户知道需要更小的子集)。
+            if len(out) > BAIDU_MAX_ITEMS:
+                raise BaiduError(
+                    -1,  # 自定义错误码:item cap
+                    f"listall 返回项数 {len(out)} > BAIDU_MAX_ITEMS={BAIDU_MAX_ITEMS}"
+                    f" —— 请缩小 --input 范围或调整 cfg[source][baidu][root]"
+                )
             if not data.get("has_more") or not batch:
                 break
             start += len(batch)
