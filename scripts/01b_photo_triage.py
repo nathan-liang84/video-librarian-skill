@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """阶段 1b:照片分诊(集成层)。
 
-**负责人:Atlas(机械层 / 集成)。**
-
 职责:在调模型之前(成本控制点)做"砍量+归一":
 1. **垃圾启发式**:`lib.triage.classify_content` 判定 → 标 ``is_junk``/``junk_reason``,``status=junk``。
 2. **近重复归组**:对非垃圾照片 pHash + 时间近邻归组,挑代表;非代表成员 ``status=grouped``。

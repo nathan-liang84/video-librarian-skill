@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from lib.config import load_config, validate_config  # noqa: E402
-from lib.imaging import heif_available  # noqa: E402  (Atlas: 照片归一化所需 HEIC 支持探测)
-from lib.triage import _imagehash_available  # noqa: E402  (Atlas: 近重复归组所需 imagehash 探测)
+from lib.imaging import heif_available  # noqa: E402  (照片归一化所需 HEIC 支持探测)
+from lib.triage import _imagehash_available  # noqa: E402  (近重复归组所需 imagehash 探测)
 
 
 def _ffmpeg_hint() -> str:

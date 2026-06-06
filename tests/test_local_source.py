@@ -1,6 +1,6 @@
-"""P1-N2 验收测试(Opus 出题):LocalSource —— 现有 01_scan 行为零变化包进 Source 接口。
+"""P1-N2 验收测试:LocalSource —— 现有 01_scan 行为零变化包进 Source 接口。
 
-Atlas 实现到 `pytest -q` 全绿,**不得删改/弱化**。
+实现到 `pytest -q` 全绿,**不得删改/弱化**。
 
 接口约定:
 - adapters/source_local.py 暴露 LocalSource(Source),name="local",可无参实例化。

@@ -1,4 +1,4 @@
-"""照片分诊(triage)助手(纯函数,可单测)。负责人:Atlas(机械层)。
+"""照片分诊(triage)助手(纯函数,可单测)。
 
 职责:在调模型之前(成本控制点)做"砍量+归一"决策:
 1. 垃圾启发式:判定 junk_reason(screenshot/document/meme;None=保留)

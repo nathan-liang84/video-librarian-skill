@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
-from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 — 照片归一化)
+from lib.imaging import register_heif  # noqa: E402  (集成 — 照片归一化)
 
 
 def _target_frame_cap(record, cfg: dict) -> int:

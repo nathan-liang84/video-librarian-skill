@@ -21,7 +21,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
 from lib.record import Record  # noqa: E402
-from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 — 读 HEIC/HEIF EXIF)
+from lib.imaging import register_heif  # noqa: E402  (集成 — 读 HEIC/HEIF EXIF)
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}

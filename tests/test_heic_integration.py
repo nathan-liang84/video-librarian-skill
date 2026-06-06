@@ -1,6 +1,6 @@
 """P1a-B-2:HEIC/旋正接入管线(集成层)测试。
 
-负责人:Atlas(机械层)。覆盖:
+覆盖:
 - 01_scan.probe_photo 通过 register_heif 调通,未装时降级不抛
 - 01_scan.PHOTO_EXTS 包含 .heif
 - 02_extract._normalize_photo_frame 产出归一化帧,失败时返 None
