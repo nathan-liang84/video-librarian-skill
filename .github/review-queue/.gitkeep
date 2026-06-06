@@ -1,0 +1,11 @@
+# Codex review-relay 入站占位
+
+历史:PR #41 (`feat(ci): review-relay workflow — 解决 Codex DNS 写请求问题`)
+设计为 Codex 把 review 结论写到这里 `pr-<N>.json`,然后通过 `git push` 触发
+`.github/workflows/review-relay.yml` 用 `GITHUB_TOKEN` 写入 review。
+
+#41 在 6/5 CLOSED(2026-06-05T20:36:02Z)未真合到仓库。本目录保留作为未来 Codex
+提交通道的物理路径占位;目前的 review 触发由仓库外 `~/bin/pr-reviewer-watch.sh`
+守护进程做(watcher 方案,见 `../REVIEW_RELAY.md`)。
+
+注意:本目录**只**用于 Codex → Actions 的入站,**不**用于人写。
