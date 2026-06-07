@@ -8,7 +8,14 @@
 - id = 文件内容 SHA1 前16位(大文件可分块哈希)。同 id 视为重复,跳过。
 - 视频用 ffprobe 取 时长/分辨率/fps/codec/创建时间/GPS;照片读 EXIF(拍摄时间/设备/GPS)。
 - 每个文件 upsert 一条 status=pending 的 Record 到 manifest。
+
+P1-N5 集成层(Atlas 2026-06-05):加 --source 开关 + 暴露 build_source / record_from_item 两个
+工厂/转换函数,让本地与网盘走同一条管线。改顶部加 from __future__ import annotations 以
+兼容 Python 3.9(本文件多个签名用了 str|None 联合类型;下游为本地或网盘记录,
+build_source 返回的 Source.list() 产出交由 record_from_item 转 Record 后 upsert 到 manifest)。
 """
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -21,7 +28,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
 from lib.record import Record  # noqa: E402
-from lib.imaging import register_heif  # noqa: E402  (集成 — 读 HEIC/HEIF EXIF)
+from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 - 读 HEIC/HEIF EXIF)
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -31,7 +38,7 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 # .mov 自身记 status=live_motion_skip(分支终态),后续 02-06 一律跳过、06 不召回。
 _LIVE_MOTION_EXTS = {".mov"}
 # 静态分量只认 iOS Live Photo 实际导出的格式(HEIC/JPEG)。
-# .png/.webp 不是 Live Photo 静态格式 —— 它们与同名 .mov 同目录纯属巧合,
+# .png/.webp 不是 Live Photo 静态格式 -- 它们与同名 .mov 同目录纯属巧合,
 # 不可据此把那条 .mov 判为动态分量并抑制(否则会静默丢掉真实视频)。
 _LIVE_STILL_EXTS = {".heic", ".heif", ".jpg", ".jpeg"}
 
@@ -155,7 +162,7 @@ def probe_video(path: Path) -> dict[str, Any]:
 def probe_photo(path: Path) -> dict[str, Any]:
     # P1a-B-2:HEIC/HEIF 需要 pillow-heif 已被注册,PIL.Image.open 才能读到 EXIF。
     # 未装时 register_heif() 静默返回 False;万一它自身抛(用户 monkeypatch / 极端情况),
-    # 这里再包一层 try/except,绝不让它把 probe_photo 弄崩 —— 缺能力是常态,不是异常。
+    # 这里再包一层 try/except,绝不让它把 probe_photo 弄崩 -- 缺能力是常态,不是异常。
     try:
         register_heif()
     except Exception:  # noqa: BLE001
@@ -243,37 +250,205 @@ def build_record(path: Path, media_type: str, *,
     )
 
 
+# ---------- P1-N5 集成层(Atlas) ----------
+
+def build_source(cfg: dict[str, Any], source: str | None = None) -> Any:
+    """按 cfg/source 名构造一个 Source 适配器。
+
+    source 为 None 时,读 ``cfg["source"]["type"]``;为 "local" → ``LocalSource()``;
+    为 "baidu" → ``BaiduSource(cred_path=cfg["source"]["baidu"]["cred_path"])``。
+    显式传 source 优先于 cfg(供 run_all 等场景覆盖)。
+
+    返回: ``Source`` 子类实例(LocalSource / BaiduSource)。
+    凭据路径必为本地文件;运行期不在仓内(Phase 1 默认
+    ``~/.config/video-librarian/baidu_credentials.json``)。
+    """
+    chosen = source or (cfg.get("source", {}) or {}).get("type") or "local"
+
+    if chosen == "local":
+        from adapters.source_local import LocalSource  # noqa: WPS433
+        return LocalSource()
+
+    if chosen == "baidu":
+        from adapters.source_baidu import BaiduSource  # noqa: WPS433
+        baidu_cfg = (cfg.get("source", {}) or {}).get("baidu", {}) or {}
+        cred_path = baidu_cfg.get("cred_path")
+        if not cred_path:
+            raise ValueError(
+                "build_source(baidu): cfg['source']['baidu']['cred_path'] 必填 "
+                "(默认 ~/.config/video-librarian/baidu_credentials.json)"
+            )
+        return BaiduSource(cred_path=cred_path)
+
+    raise ValueError(f"未知数据源: {chosen!r}(仅支持 'local' / 'baidu')")
+
+
+def record_from_item(item: Any, *, source: str) -> Any:
+    """从 SourceItem 构建 Record。**传播**所有上游给到的字段:
+
+    - id:``item.record_id``(本地 sha1[:16] / 网盘 md5[:16])
+    - media_type:item.media_type
+    - source:调用方传入的源名("local" / "baidu")
+    - remote_path:item.remote_path
+    - fs_id:item.fs_id
+    - remote_md5:item.content_md5
+    - shot_at:item.shot_at
+    - raw["stat_meta"] 的 resolution/fps/codec/duration_sec/device → Record 对应字段
+    - raw["status"]=="live_motion_skip" → Record.status(默认 "pending")
+    - raw["live_motion_path"] → Record.live_motion_path
+
+    路径 / original_name:从 item.path 取。LocalSource 已是绝对路径(零行为变化);
+    BaiduSource 的 item.path 为远端路径,原样存入 Record.path -- 但旁车落本地按 id
+    走(见 SidecarAdapter 的非 local 分支)。
+
+    不写 Record.content_kind(那是 #29 目录级字段,01_scan 后续会基于
+    ``types_seen`` 聚合写入,不在这里管)。
+    """
+    stat_meta = (item.raw or {}).get("stat_meta", {}) or {}
+    raw_status = (item.raw or {}).get("status")
+    status = "live_motion_skip" if raw_status == "live_motion_skip" else "pending"
+
+    # 路径:本地为绝对路径,网盘为远端路径 -- 原样存,让 SidecarAdapter 自己
+    # 按 source 决定落点(网盘记录不依赖 path 推算本地落点,按 record.id 走)。
+    path = item.path or ""
+    original_name = Path(path).name if path else ""
+
+    # remote_md5:item.content_md5 是 32 字符 hex;Record.remote_md5 期望同长。
+    remote_md5 = item.content_md5 if item.content_md5 else None
+
+    return Record(
+        id=item.record_id or "",
+        media_type=item.media_type,
+        original_name=original_name,
+        path=path,
+        status=status,
+        source=source,
+        remote_path=item.remote_path,
+        fs_id=item.fs_id,
+        remote_md5=remote_md5,
+        # 文件大小:SourceItem.size(字节) → Record.filesize_mb
+        # 与 01_scan 旧 build_record 契约字节对齐: round 到 3 位;0 字节 → 0.0(不返 None);
+        # 仅 item.size 缺(None / 未填)时才 None。
+        filesize_mb=round(item.size / (1024 * 1024), 3) if item.size is not None else None,
+        # 原始元数据(raw["stat_meta"])透传到 Record 对应字段
+        resolution=stat_meta.get("resolution"),
+        fps=stat_meta.get("fps"),
+        codec=stat_meta.get("codec"),
+        duration_sec=stat_meta.get("duration_sec"),
+        device=stat_meta.get("device"),
+        # Live Photo 配对传播
+        live_motion_path=(item.raw or {}).get("live_motion_path"),
+        shot_at=item.shot_at,
+    )
+
+
+def _validate_baidu_scope(input_path: str, cfg: dict[str, Any], *,
+                          opt_in: bool) -> str:
+    """P1 防御(PR #44): 校验 --input 必须在 cfg[source][baidu][root] 范围内。
+
+    - 缺 cfg[source][baidu][root] → 报错(让用户到 config.yaml 配)
+    - input_path == "/" 或空 → 报错(明显误命令)
+    - input_path 不在 scope 内 (root 或 root 的子路径) → 报错
+    - opt_in=True → 跳过 scope check(depth / item cap 仍由 BaiduSource 守住)
+
+    返回: 规范化后的 input_path(去尾斜杠,保证与 cfg[source][baidu][root] 比对一致)。
+    """
+    baidu_cfg = (cfg.get("source", {}) or {}).get("baidu", {}) or {}
+    scope_root = (baidu_cfg.get("root") or "").rstrip("/")
+    normalized = (input_path or "").rstrip("/") or "/"
+
+    if opt_in:
+        # 用户明示:跳过 scope check(但仍提示 scope 以便追溯)
+        if scope_root:
+            print(f"  (提示:--i-know-what-im-doing 已设,跳过 scope check;"
+                  f"当前 baidu scope = {scope_root!r})")
+        return normalized
+
+    if not scope_root:
+        raise ValueError(
+            "baidu 模式必须配置 cfg[source][baidu][root](网盘侧授权子路径, 如 /素材集)。"
+            "请在 config/config.yaml 配上后重跑;若要绕过,加 --i-know-what-im-doing。"
+        )
+
+    if normalized == "/" or normalized == "":
+        raise ValueError(
+            f"--input '/' 不合法(会扫整个云盘)。"
+            f"请用具体子路径,如 --input {scope_root}/海边"
+        )
+
+    # 必须在 scope_root 或其子路径下
+    if normalized != scope_root and not normalized.startswith(scope_root + "/"):
+        raise ValueError(
+            f"--input {normalized!r} 不在 baidu scope {scope_root!r} 内。"
+            f"请用 scope 内的子路径,或在 config.yaml 调整 root,或加 --i-know-what-im-doing 绕过。"
+        )
+    return normalized
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="素材目录")
+    ap.add_argument("--input", required=True,
+                    help="素材路径(本地=目录绝对路径;网盘=网盘内路径,如 /素材集)")
     ap.add_argument("--manifest", default="state/manifest.json")
+    ap.add_argument("--source", choices=["local", "baidu"], default="local",
+                    help="数据源:local=本地目录(默认),baidu=百度网盘(需 cfg[source][baidu][cred_path])")
+    ap.add_argument("--config", default="config/config.yaml",
+                    help="配置文件(baidu 源从中读 cred_path)")
+    ap.add_argument("--i-know-what-im-doing", action="store_true",
+                    help="baidu 模式:跳过 --input scope 校验(谨慎使用;"
+                         "depth / item cap 仍由 BaiduSource 守住)")
     args = ap.parse_args()
 
-    manifest = Manifest(Path(args.manifest)).load()
-    input_dir = Path(args.input)
-    if not input_dir.exists():
-        raise FileNotFoundError(f"素材目录不存在: {input_dir}")
+    # 1) 加载 cfg(baidu 需要 cred_path;local 不用,加载失败也接受)
+    cfg: dict[str, Any] = {}
+    cfg_path = Path(args.config)
+    if cfg_path.exists():
+        try:
+            from lib.config import load_config  # noqa: WPS433
+            cfg = load_config(cfg_path) or {}
+        except Exception:  # noqa: BLE001
+            cfg = {}
 
-    # 第一遍:收集媒体文件(顺带计垃圾),以便整体判断 Live Photo 配对
-    media: list[tuple[Path, str]] = []
-    junk = 0
-    for path in sorted(input_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        if is_junk_name(path.name):     # ._资源叉 / .DS_Store 等系统垃圾,先计数再跳
-            junk += 1
-            continue
-        media_type = detect_media_type(path)
-        if media_type is None:
-            continue
-        media.append((path, media_type))
+    # 2) baidu 模式先做 scope 校验(防 --input / 扫整个云盘);必须在 build_source
+    # 之前 —— build_source 会因 cfg 缺 cred_path 而 raise,scope check 永远到不了。
+    # 校验通过后用规范化 path(去尾斜杠)喂给 source.list;local 模式不需要这一步。
+    baidu_input = ""
+    if args.source == "baidu":
+        baidu_input = _validate_baidu_scope(
+            args.input, cfg, opt_in=args.i_know_what_im_doing,
+        )
 
-    motion_to_photo = pair_live_photos(media)
-    photo_to_motion = {photo: motion for motion, photo in motion_to_photo.items()}
+    # 3) 工厂造 Source(本地/网盘)
+    source = build_source(cfg, source=args.source)
 
-    # P1b-1:聚合目录下媒体类型 → 写入 content_kind。
-    # 仅 video → "video";仅 photo → "photo";两者都有 → "mixed";空(理论上不会到这里)→ None
-    types_seen = {mt for _, mt in media}
+    # 4) 枚举素材(local 需传绝对路径;网盘传规范化后的 path)
+    if args.source == "local":
+        input_path = str(Path(args.input).resolve())
+        root_path = Path(input_path)
+        if not root_path.exists():
+            raise FileNotFoundError(f"素材目录不存在: {input_path}")
+        # 统计被 LocalSource 内部过滤掉的系统垃圾(._资源叉 / Thumbs.db 等),
+        # 仅为 stdout 报数;LocalSource 内部已用同样的 is_junk_name 规则过滤,
+        # 不会影响 items 集合。baidu 模式无此概念(网盘没有"系统垃圾"项)→ 0。
+        junk = sum(1 for p in root_path.rglob("*")
+                   if p.is_file() and is_junk_name(p.name))
+    else:
+        # baidu 模式:input_path 已在 #2 规范化(去尾斜杠、scope 校验)
+        input_path = baidu_input
+        junk = 0
+    items = list(source.list(input_path))
+
+    # 4) stat 补 ffprobe/EXIF 元数据(SourceItem.raw["stat_meta"])
+    enriched: list[Any] = []
+    for it in items:
+        try:
+            enriched.append(source.stat(it))
+        except Exception:  # noqa: BLE001  —— 不让一条坏 stat 拦下整次扫描
+            enriched.append(it)
+
+    # 5) P1b-1:聚合目录下媒体类型 → content_kind(01_scan 域,不入 Source)。
+    # 仅 video → "video";仅 photo → "photo";两者都有 → "mixed";空 → None
+    types_seen = {it.media_type for it in enriched}
     if types_seen == {"video"}:
         content_kind: str | None = "video"
     elif types_seen == {"photo"}:
@@ -283,26 +458,22 @@ def main() -> int:
     else:
         content_kind = None
 
-    # 第二遍:建记录。配对的 .mov → live_motion_skip(不探测元数据);配对的照片 → 记 live_motion_path
-    seen_ids = set()
+    # 6) SourceItem → Record 传播(由 record_from_item 统一处理 Live Photo / 字段 / filesize_mb)
+    manifest = Manifest(Path(args.manifest)).load()
+    seen_ids: set[str] = set()
     added = 0
     skipped = 0
     live_skipped = 0
-    for path, media_type in media:
-        if path in motion_to_photo:
-            record = build_record(path, media_type, status="live_motion_skip",
-                                  probe=False, content_kind=content_kind)
-        elif path in photo_to_motion:
-            record = build_record(path, media_type,
-                                  live_motion_path=str(photo_to_motion[path]),
-                                  content_kind=content_kind)
-        else:
-            record = build_record(path, media_type, content_kind=content_kind)
-
+    for it in enriched:
+        record = record_from_item(it, source=args.source)
+        # content_kind 聚合属 01_scan 域,由 record_from_item 外部按 issue #11 契约不写
+        record.content_kind = content_kind
+        if not record.id:
+            skipped += 1
+            continue
         if record.id in seen_ids or manifest.get(record.id) is not None:
             skipped += 1
             continue
-
         seen_ids.add(record.id)
         manifest.upsert(record)
         added += 1
@@ -313,10 +484,11 @@ def main() -> int:
     msg = f"扫描完成: 新增 {added} 条, 跳过重复 {skipped} 条"
     if live_skipped:
         msg += f", Live Photo 动态分量 {live_skipped} 个(配对后不单独入库)"
-    if content_kind:
-        msg += f", 目录内容类型={content_kind}"
     if junk:
         msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
+    if content_kind:
+        msg += f", 目录内容类型={content_kind}"
+    msg += f", 数据源={args.source}"
     print(msg)
     return 0
 
