@@ -343,6 +343,34 @@ def record_from_item(item: Any, *, source: str) -> Any:
     )
 
 
+def _effective_source_cfg(cfg: dict[str, Any], cli_source: str | None) -> dict[str, Any]:
+    """P1 防御(PR #46 复审 #1): 合并 CLI ``--source`` 跟 cfg,得到 effective source cfg。
+
+    **不依赖 cfg 里的 ``source.type`` 字面值**。如果 CLI 传了 ``--source baidu``,
+    即使 cfg 里 ``source.type`` 是 ``local``(或缺失),effective source 仍是 baidu,
+    此时 ``require_scan_root`` 必须看 baidu 段;否则攻击场景:cfg 是 local 默认
+    (无 baidu 配置) + CLI ``--source baidu --input / --i-know-what-im-doing`` 会
+    跳过 root 校验 + scope 校验,直接调 baidu source 扫全盘。
+
+    合并规则:
+    - 拷一份 cfg(不原地改)
+    - ``source.type`` 取 cli_source(优先)或 cfg
+    - 如果 effective type 是 baidu 且 cfg 缺 ``baidu`` 段,补一个空段
+      (让 ``require_scan_root`` 能看到 ``baidu.root == None`` 然后 raise)
+    """
+    merged: dict[str, Any] = dict(cfg) if isinstance(cfg, dict) else {}
+    src_section: dict[str, Any] = dict(merged.get("source") or {})
+    if not isinstance(src_section, dict):
+        src_section = {}
+    if cli_source:
+        src_section["type"] = cli_source
+    # type=baidu 但缺 baidu 段 → 补空段(让 root 校验能看到)
+    if src_section.get("type") == "baidu" and not isinstance(src_section.get("baidu"), dict):
+        src_section["baidu"] = {}
+    merged["source"] = src_section
+    return merged
+
+
 def _validate_baidu_scope(input_path: str, cfg: dict[str, Any], *,
                           opt_in: bool) -> str:
     """P1 防御(PR #44): 校验 --input 必须在 cfg[source][baidu][root] 范围内。
@@ -421,9 +449,15 @@ def main() -> int:
         # - _validate_baidu_scope: 验 --input 是不是在 root 范围内
         # 两者都先于 build_source(build_source 可能因 cred_path 缺失先 raise,
         # 那就永远到不了隐私门 —— 隐私门是上游安全门,必须最先走)。
-        require_scan_root(cfg)
+        #
+        # P1 防御(PR #46 复审): 不直接拿 cfg 调 require_scan_root —— 如果
+        # cfg 是 local 默认配置(无 baidu 段)+ CLI --source baidu,require_scan_root
+        # 会看 cfg.source.type="local" 返 None,跳过 root 校验。必须先合并 CLI
+        # 跟 cfg,让 effective type=baidu 走 require_scan_root 的 baidu 分支。
+        effective_cfg = _effective_source_cfg(cfg, args.source)
+        require_scan_root(effective_cfg)
         baidu_input = _validate_baidu_scope(
-            args.input, cfg, opt_in=args.i_know_what_im_doing,
+            args.input, effective_cfg, opt_in=args.i_know_what_im_doing,
         )
 
     # 3) 工厂造 Source(本地/网盘)

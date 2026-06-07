@@ -213,6 +213,11 @@ source:
 ### 13.2 隐私基线(实现须满足)
 **针对 i:**
 1. **绝不默认扫全盘**:`source.baidu.root` **必填**,空或 `/` 直接拒跑;只处理用户显式指定的目录。
+   - **CLI `--source` 优先级**(PR #46 复审 #1 防御):
+     root 校验看的是 **effective source**(CLI `--source` 跟 cfg 合并后的结果),
+     不依赖 cfg 里 `source.type` 的字面值。攻击场景(cfg 是 local 默认 + CLI
+     `--source baidu --input / --i-know-what-im-doing`)在合并后必须
+     因 baidu.root 缺失而 raise,不能跳过根校验。
 2. **运行前知情确认**:开跑前打印"将处理 /X 下 N 个文件,其画面/语音会上传给 <模型> 理解",需确认。
 3. **敏感内容默认跳过**:可配 `source.exclude`(文件夹名/glob);默认排除证件/财务/截图/文档等;**在抽帧上传前**就过滤,敏感文件不进模型。默认"跳过+用户可显式纳入"。
 
