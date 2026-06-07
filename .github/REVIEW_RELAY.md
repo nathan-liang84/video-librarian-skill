@@ -20,13 +20,26 @@ PR review 自动触发**当前依赖仓库外 watcher**(`方案 C`,最低风险)
 - `~/bin/pr-reviewer-watch.sh` —— watcher 脚本
 - `~/Library/LaunchAgents/io.video-librarian.pr-reviewer-watch.plist` —— launchd 配置
 
-**触发逻辑**:
+**触发逻辑**(P1 修复:覆盖度按 head.sha 精确匹配):
 1. launchd 每 30 分钟跑一次 watcher
-2. watcher 调 `gh pr list --state open` 拿所有 open PR
-3. 对每个 PR:查最近 15 分钟内是否有新 commit
-4. 若有,检查 PR 评论/已记录 state 是否已有 Codex review
-5. **若没有** → 飞书 DM 通知 master(`~/bin/feishu-dm.sh`)
+2. watcher 调 `gh pr list --state open --json number,headRefOid` 拿**所有 open PR** 的最新 head SHA
+3. 对每个 PR:拉取其**所有评论**(`comments`)和**正式 review body**(`reviews`),逐条 grep
+4. 命中**精确双 token**(同一条评论里**同时**含):
+   - `Role: GPT-5.5 Reviewer`(精确字串)
+   - `Reviewed head: <headRefOid>`(精确全 40 字符 SHA,不是短 SHA)
+   → 算覆盖,跳过
+5. **不满足** → 飞书 DM 通知 master(`~/bin/feishu-dm.sh`)
 6. watcher **不**调任何 LLM / 写 review / 调 Codex API
+
+**抑制规则强约束**(P1-2 修复,以下都不算覆盖):
+- ❌ 本地 state 文件 `/tmp/pr-reviewer-watch.state/<N>.last-sha` —— 不参与抑制(只防重发,不防漏)
+- ❌ 泛泛 "review" / "codex" / "gpt-5.5" / "LGTM" / "looks good" 提及 —— 不算
+- ❌ 短 SHA 匹配(`Reviewed head: 656da94`)—— 不算(必须全 40 字符)
+- ❌ 跨条评论聚合(`Role` 在评论 A,`Reviewed head` 在评论 B)—— 不算(必须同一条)
+- ❌ 上一次 review 的 head SHA 与本次 head.sha 不一致 —— 不算(每次 push 都需要重审)
+
+**为什么不留 state 文件**:watcher/API/推送断链时长于 15 分钟 → open PR 永久无 review 漏检。
+按 head.sha 精确匹配可保证:**只要 head 变 + 没有精确 review → 必通知**(每次 push 都会变 SHA)。
 
 ## master 决策后
 
@@ -34,9 +47,6 @@ master 看到通知后,可选:
 - 手动触发 Codex review(用自己订阅的 `gpt-5.5` bot)
 - 跳过(小修改/已知问题)
 - 推迟(等下班后)
-
-watcher 的状态文件 `/tmp/pr-reviewer-watch.state/<N>.last-sha` 记录
-"已通知过哪个 SHA",同一 SHA 不重复通知。
 
 ## 如何 dry-run
 
