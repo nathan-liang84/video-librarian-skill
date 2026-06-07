@@ -4,7 +4,8 @@
 本模块把 docs §13 的隐私基线落成 source 无关的纯函数:
 
 1. ``require_scan_root(cfg)`` — 拒绝 baidu 源扫全盘(空/"/"/缺 root → ValueError)
-2. ``is_excluded(path, exclude)`` — 默认敏感(证件/财务/截图/文档)或用户 glob
+2. ``is_excluded(path, exclude, *, include=None)`` — 默认敏感(证件/财务/截图/文档)或用户 glob;
+   ``include`` 显式覆盖默认(用户可显式纳入被默认关键词误伤的合法素材)
 3. ``redact_path(path)`` — 同输入稳定可追溯的脱敏(SHA1[:8] 替代路径片段)
 
 设计原则(同 lib/triage.py / lib/imaging.py):
@@ -19,6 +20,7 @@
 - ``require_scan_root`` 接受 local 源 cfg → 返回 None
 - ``is_excluded`` 默认清单命中"证件照片/财务/Screenshots"等路径片段
 - ``is_excluded`` 用户 glob 走 fnmatch 风格
+- ``is_excluded`` include 白名单覆盖默认(被默认关键词误伤时用户可显式纳入)
 - ``redact_path`` 同输入稳定 + 不泄露文件名/父目录名
 """
 from __future__ import annotations
@@ -80,16 +82,20 @@ def require_scan_root(cfg: dict[str, Any]) -> str | None:
         raise ValueError(
             "baidu 模式必须配置 cfg['source']['baidu']['root']"
             "(网盘侧授权子路径, 如 /素材/待整理)。"
-            "请在 config/config.yaml 配上后重跑;"
-            "若要绕过(不推荐),加 --i-know-what-im-doing。"
+            "请在 config/config.yaml 配上合法 root(非空、非 / )后重跑。"
+            "root 必填,不可绕过。"
         )
     return root.rstrip("/")
 
 
-def is_excluded(path: str, exclude: list[str]) -> bool:
+def is_excluded(path: str, exclude: list[str], *, include: list[str] | None = None) -> bool:
     """判定 path 是否属于"应排除不送模型"项(隐私基线)。
 
-    排除规则(任一命中即 True):
+    判定顺序(短路):
+    0. **include 白名单**(如设)——任一命中 → 走通(返 False)。
+       满足 docs §13.2-3 "用户可显式纳入":即便被默认关键词误伤
+       (如 /Downloads/family.mp4 被 "Downloads" 关键字命中),用户也可
+       用 include 显式纳入。
     1. 默认敏感关键词(中文/英文路径段,大小写不敏感)
     2. 默认敏感扩展名(.pdf/.doc/.xls/.eml/.zip 等文档/压缩类)
     3. 用户自定义 glob 列表 ``exclude``(fnmatch 风格,任一命中)
@@ -99,6 +105,10 @@ def is_excluded(path: str, exclude: list[str]) -> bool:
     """
     if not path or not isinstance(path, str):
         return False
+    # 0) include 白名单(显式纳入)—— 在默认规则之前判定,实现"显式覆盖默认"
+    for glob in include or []:
+        if glob and fnmatch.fnmatch(path, glob):
+            return False
     p_lower = path.lower()
     # 1) 默认关键词
     for kw in _DEFAULT_SENSITIVE_KEYWORDS:
