@@ -483,13 +483,22 @@ def main() -> int:
     # P1-N7 隐私门(issue #13): 过滤默认敏感 + 用户 exclude glob。
     # 敏感项不进 02/03(不上传画面/语音给模型),不进 manifest。
     # exclude 从 cfg["source"]["exclude"] 读(可选,默认空)。
+    # include 从 cfg["source"]["include"] 读(可选,默认空),满足 §13.2-3
+    # "用户可显式纳入" —— 被默认敏感清单误伤(如 /Downloads/family.mp4 被
+    # "Downloads" 关键词命中)的合法素材,用户可显式纳入。
+    # (P2 修复 PR #46 12:52 Opus 备用审: 之前 P2-2 只改函数没接管线,补上)
     exclude_globs: list[str] = ((cfg.get("source") or {}).get("exclude") or []) \
         if isinstance(cfg, dict) else []
     if not isinstance(exclude_globs, list):
         exclude_globs = []
+    include_globs: list[str] = ((cfg.get("source") or {}).get("include") or []) \
+        if isinstance(cfg, dict) else []
+    if not isinstance(include_globs, list):
+        include_globs = []
     pre_exclude_count = len(items)
     items = [it for it in items
-             if not is_excluded(getattr(it, "path", "") or "", exclude_globs)]
+             if not is_excluded(getattr(it, "path", "") or "",
+                                exclude_globs, include=include_globs)]
     excluded_count = pre_exclude_count - len(items)
 
     # P1-N7 知情确认(issue #13 §4): 跑前告知用户本次处理的文件数 + 上传哪个模型。

@@ -1,5 +1,6 @@
 """隐私基线验收测试(Opus 出题):root 必填 / 敏感排除 / 路径脱敏。"""
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -151,3 +152,93 @@ def test_is_excluded_include_overrides_default():
     assert is_excluded("/x/证件照片/ID.jpg", [], include=[]) is True
     # 场景 8: 普通媒体路径,默认未命中 → 返 False
     assert is_excluded("/x/旅行/海边.jpg", [], include=["*/家庭/*"]) is False
+
+
+# --- Opus 12:52 P2 回归: 01_scan 管线接 include 参数 + config 读 source.include ---
+# P2 修复(PR #46 12:52 Opus 备用审): P2-2 只改了 is_excluded 函数, 没接进 01_scan 管线。
+# 用户在 config.example 看不到 include 入口, 仍无法逆向默认清单。本测试锁住集成:
+# - cfg 配 source.include
+# - 01_scan 走完整 main() 流程(子进程)
+# - 验证被默认关键词误伤的路径被 include 纳入, 走 manifest
+
+def test_integration_01_scan_respects_source_include(tmp_path):
+    """集成测试(PR #46 Opus 12:52 P2): cfg.source.include 被 01_scan 读取,
+    被默认敏感清单误伤的路径走 include 路径进 manifest。
+
+    复现原 bug: is_excluded 有 include 参数了, 但 01_scan 没接管线,
+    配 source.include 不生效。本测试 01_scan 走子进程 + 真实 config.yaml。
+    """
+    import subprocess
+    # 准备素材: 2 个文件
+    # - 普通路径 (走默认 → 入库)
+    # - Downloads 路径 (被默认 "Downloads" 关键词误伤, 走 include → 显式纳入)
+    media_dir = tmp_path / "media"
+    (media_dir / "旅行" / "海边").mkdir(parents=True)
+    (media_dir / "Downloads").mkdir()
+    (media_dir / "旅行" / "海边" / "sunset.mp4").write_bytes(b"normal-mp4")
+    (media_dir / "Downloads" / "family.mp4").write_bytes(b"family-mp4")
+
+    # config 配 include 显式纳入 family.mp4
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: local\n"
+        "  exclude: []\n"
+        "  include:\n"
+        "    - \"*/Downloads/family.mp4\"\n",
+        encoding="utf-8",
+    )
+
+    # 走 01_scan 子进程
+    scan_script = ROOT / "scripts" / "01_scan.py"
+    manifest_path = tmp_path / "manifest.json"
+    result = subprocess.run(
+        [
+            sys.executable, str(scan_script),
+            "--input", str(media_dir),
+            "--manifest", str(manifest_path),
+            "--config", str(config_path),
+        ],
+        capture_output=True, text=True, check=False,
+        cwd=tmp_path,
+    )
+    # 01_scan 应成功退出
+    assert result.returncode == 0, f"01_scan 失败: stdout={result.stdout!r} stderr={result.stderr!r}"
+
+    # 验证 manifest 包含 family.mp4(被 include 纳入)
+    # manifest schema: {record_id: {path, original_name, media_type, ...}}
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    names = {rec.get("original_name", "") for rec in payload.values()}
+
+    # 两个文件都应入库(一个普通, 一个被 include 显式纳入)
+    assert "sunset.mp4" in names, f"普通路径未入库, names={names}"
+    assert "family.mp4" in names, f"被 include 显式纳入的 family.mp4 未入库, names={names}"
+
+    # 验证 stdout 有知情确认(说明走通了 main() 完整流程)
+    assert "将处理" in result.stdout
+    assert "文件" in result.stdout
+
+    # 反向验证: 不配 include 时 family.mp4 会被排除
+    config_no_include = tmp_path / "config_no_include.yaml"
+    config_no_include.write_text(
+        "source:\n  type: local\n  exclude: []\n  include: []\n",
+        encoding="utf-8",
+    )
+    manifest_no_include = tmp_path / "manifest_no_include.json"
+    result2 = subprocess.run(
+        [
+            sys.executable, str(scan_script),
+            "--input", str(media_dir),
+            "--manifest", str(manifest_no_include),
+            "--config", str(config_no_include),
+        ],
+        capture_output=True, text=True, check=False,
+        cwd=tmp_path,
+    )
+    assert result2.returncode == 0
+    payload2 = json.loads(manifest_no_include.read_text(encoding="utf-8"))
+    names2 = {rec.get("original_name", "") for rec in payload2.values()}
+    assert "sunset.mp4" in names2, "普通路径在无 include 时也应入库"
+    assert "family.mp4" not in names2, (
+        f"无 include 时 family.mp4 应被默认清单排除, 但它入库了: names={names2}"
+    )

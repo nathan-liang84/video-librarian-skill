@@ -38,6 +38,17 @@ source:
   #     - "*/亲友/*"
   # 不需要的话整段留空 / 注释。
   exclude: []
+  # 显式纳入(PR #46 P2 修复, 12:52 Opus 备用审): docs §13.2-3 要求
+  # "默认跳过 + 用户可显式纳入"。这里只列你想逆频默认清单的 glob
+  # (fnmatch 风格, 优先级高于默认关键词/默认 ext/用户 exclude)。
+  # 场景: 被默认 "Downloads" 关键词误伤的合法素材
+  # (如 /Downloads/family.mp4) 可用 include 显式纳入进 02/03。
+  # 如:
+  #   include:
+  #     - "*/Downloads/family.mp4"
+  #     - "*/Documents/项目技术文档/*"
+  # 不需要的话整段留空 / 注释。
+  include: []
 
 # ── 模型(provider 无关:任何 OpenAI 兼容服务都可用)─────────
 # 安装 skill 后建议由配置引导(见 SKILL.md)带你选择并填写。
