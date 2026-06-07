@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """阶段5:入库。把记录写入数据层(飞书 / 旁车+Excel / 双写)。
 
-负责人:GPT-5.4。
+
 
 - build_adapter(cfg) 按 store.mode 选适配器。
 - adapter.upsert_records(records) 幂等写入;sidecar 还会写同名 .json。

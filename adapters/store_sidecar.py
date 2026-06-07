@@ -5,7 +5,7 @@
 - 汇总成 output/_素材总表.xlsx
 - rebuild_summary 可仅从旁车 .json 重建总表
 
-负责人:GPT-5.4。
+
 """
 from __future__ import annotations
 

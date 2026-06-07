@@ -1,4 +1,4 @@
-"""PR #44 P1 防御测试(GPT-5.5 复审 #1) + P2 修复回归(GPT-5.5 复审 #2)。
+"""PR #44 P1 防御测试 + P2 修复回归。
 
 5 个 P1 防御点:
 1. scope 校验: --input 必须在 cfg[source][baidu][root] 内
@@ -11,7 +11,7 @@ P2 修复:
 6. token refresh: 老 credential(无 token_expires_at)收到 errno 110 → 触发 _do_refresh + 重试一次 → 成功
 7. token refresh: 二次调用仍返 errno 110 → raise BaiduError(不无限重试)
 
-不在本测试范围: 现有 7 个 Opus 验收 + 8 个 GPT-5.5 回归(在 test_netdisk_integration.py)。
+不在本测试范围: 现有 7 个验收 + 8 个回归(在 test_netdisk_integration.py)。
 """
 from __future__ import annotations
 
@@ -223,7 +223,7 @@ def test_baidu_item_cap_under_limit_passes(monkeypatch, tmp_path):
 
 
 # ---------- 6) token refresh: errno 110 → _do_refresh + 重试一次成功 ----------
-# P2 修复(PR #44 GPT-5.5 复审 #2): 老 credential(无 token_expires_at)被吊销时
+# P2 修复(PR #44 复审 #2): 老 credential(无 token_expires_at)被吊销时
 # 百度返 errno 110;原 _TOKEN_ERRNOS = (111, -6) 不含 110,会直接 raise BaiduError。
 # 修复后:_TOKEN_ERRNOS 加 110 → 触发 _do_refresh + 重试一次 → 成功。
 

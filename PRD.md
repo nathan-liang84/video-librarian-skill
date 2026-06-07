@@ -1,6 +1,6 @@
 # PRD:视频/照片素材智能整理 Skill(代号:VideoLibrarian)
 
-> 版本:v1.2(草案) · 日期:2026-06-03 · 负责人:yfliang84
+> 版本:v1.2(草案) · 日期:2026-06-03 · 作者:nate2750
 > 目标形态:一套**跨 Agent 平台通用的 Skill**(OpenClaw / Codex / Claude Code 均可调用)
 > v1 范围:**专业剪辑素材库**(场景 A),媒体类型涵盖**视频 + 照片**。通用大众相册整理(场景 B,任意陌生人/生活事件)仍作独立 skill。
 > **照片增强已纳入本 skill 规划**:HEIC 格式兼容、垃圾过滤、近重复归组、InsightFace 人脸聚类(剪辑素材视角)—— 详见 [docs/PHOTO_PIPELINE.md](docs/PHOTO_PIPELINE.md)。

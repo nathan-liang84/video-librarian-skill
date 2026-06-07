@@ -1,7 +1,6 @@
 """素材记录的数据结构与读写助手。
 
 契约:每条记录符合 schema/record.schema.json。各阶段(01→05)逐步填充字段并推进 status。
-负责人:Opus 4.8(契约设计) / 实现细节可由 GPT-5.4 补全。
 """
 from __future__ import annotations
 

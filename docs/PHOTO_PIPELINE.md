@@ -1,7 +1,7 @@
 # 照片管线策划(Photo Pipeline Plan)
 
 > 状态:**规划中**(planning)。本文件只定方向与设计,不含实现。落地时按"分阶段、每阶段独立 PR"推进。
-> 负责人:Opus 4.8。关联:[PRD.md](../PRD.md)、[SKILL.md](../SKILL.md)。
+> 关联:[PRD.md](../PRD.md)、[SKILL.md](../SKILL.md)。
 
 ## 0. 决策(已与用户确认)
 

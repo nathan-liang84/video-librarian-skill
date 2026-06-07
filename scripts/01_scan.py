@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """阶段1:盘点。遍历输入目录 → 内容指纹去重 → 读元数据 → 建/更新 manifest。
 
-负责人:GPT-5.4。
+
 
 要点:
 - 递归遍历,识别视频(mp4/mov/mkv/avi...)与照片(jpg/png/heic...)扩展名。

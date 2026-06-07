@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """阶段2:抽取。视频抽关键帧 + 抽音轨→ASR;照片直读;生成缩略图/雪碧图。
 
-负责人:GPT-5.4。
+
 
 抽帧策略(读 config.extract):
 - 场景切换检测 ffmpeg select='gt(scene,<scene_threshold>)' 为主
