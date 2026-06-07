@@ -15,6 +15,29 @@ store:
     app_token: ""          # 多维表格 app_token(Base)
     table_id: ""           # 素材库表 table_id
     # 所需权限:多维表格读写(bitable:app:read、bitable:app、bitable:record:create 等)
+  # 旁车回写(issue #13 P1-N7 默认值): 修名/打标签后是否回写旁车 JSON。
+  # 默认 false —— 需用户显式 --apply 才回写,避免隐私意外从 manifest 落到磁盘。
+  # 02-06 都读这个值;重设 = 临时覆写一次(保留主行为)
+  write_back_sidecar: false
+
+# ── 数据源(issue #13 P1-N7)────────────────────────────────
+# 读源配置。``type`` 决定 build_source() 走哪个适配器。
+# baidu 源 **必须**配置 ``baidu.root``(网盘侧授权子路径,不能是 / )——
+# 空/缺失会被 lib.privacy.require_scan_root 拒绝(直接 ValueError,防扫全盘)。
+# local 源不要求 root,走 --input 绝对路径。
+source:
+  type: local              # local | baidu
+  baidu:
+    root: ""               # baidu 必填:网盘子路径, 如 /素材/待整理(不能是 / 或空)
+    cred_path: ~/.config/video-librarian/baidu_credentials.json
+  # 额外排除(issue #13 P1-N7): lib.privacy.is_excluded 会先打默认敏感清单
+  # (证件/财务/截图/微信/邮件 + .pdf/.doc/.eml/.zip 等文档/压缩类),这里只列
+  # 你自己额外不想送的 glob(fnmatch 风格)。如:
+  #   exclude:
+  #     - "*/公司内部/*"
+  #     - "*/亲友/*"
+  # 不需要的话整段留空 / 注释。
+  exclude: []
 
 # ── 模型(provider 无关:任何 OpenAI 兼容服务都可用)─────────
 # 安装 skill 后建议由配置引导(见 SKILL.md)带你选择并填写。

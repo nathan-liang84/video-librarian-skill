@@ -27,6 +27,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
+from lib.privacy import is_excluded, redact_path, require_scan_root  # noqa: E402,F401  (P1-N7 网盘隐私基线;redact_path 为 02-06 未来可调用预留)
 from lib.record import Record  # noqa: E402
 from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 - 读 HEIC/HEIF EXIF)
 
@@ -414,6 +415,13 @@ def main() -> int:
     # 校验通过后用规范化 path(去尾斜杠)喂给 source.list;local 模式不需要这一步。
     baidu_input = ""
     if args.source == "baidu":
+        # P1-N7 隐私门(issue #13):baidu 源开扫前必须验证 cfg[source][baidu][root]
+        # 本身合法(非空/非"/"/非缺失)—— 拒绝扫全盘。与 _validate_baidu_scope 互补:
+        # - require_scan_root: 验 root 本身是不是合法子路径
+        # - _validate_baidu_scope: 验 --input 是不是在 root 范围内
+        # 两者都先于 build_source(build_source 可能因 cred_path 缺失先 raise,
+        # 那就永远到不了隐私门 —— 隐私门是上游安全门,必须最先走)。
+        require_scan_root(cfg)
         baidu_input = _validate_baidu_scope(
             args.input, cfg, opt_in=args.i_know_what_im_doing,
         )
@@ -437,6 +445,29 @@ def main() -> int:
         input_path = baidu_input
         junk = 0
     items = list(source.list(input_path))
+
+    # P1-N7 隐私门(issue #13): 过滤默认敏感 + 用户 exclude glob。
+    # 敏感项不进 02/03(不上传画面/语音给模型),不进 manifest。
+    # exclude 从 cfg["source"]["exclude"] 读(可选,默认空)。
+    exclude_globs: list[str] = ((cfg.get("source") or {}).get("exclude") or []) \
+        if isinstance(cfg, dict) else []
+    if not isinstance(exclude_globs, list):
+        exclude_globs = []
+    pre_exclude_count = len(items)
+    items = [it for it in items
+             if not is_excluded(getattr(it, "path", "") or "", exclude_globs)]
+    excluded_count = pre_exclude_count - len(items)
+
+    # P1-N7 知情确认(issue #13 §4): 跑前告知用户本次处理的文件数 + 上传哪个模型。
+    # print scope 作为唯一路径提示(用户自己提供的子路径;不是具体文件名)。
+    # 不打印 individual file paths(避免日志/终端泄密)。model 名从 cfg 读,不硬编码。
+    vision_model = ((cfg.get("models") or {}).get("vision") or {}).get("model") \
+        if isinstance(cfg, dict) else None
+    model_label = vision_model or "<未配置 models.vision.model>"
+    print(f"将处理 {input_path} 下 {len(items)} 个文件,"
+          f"画面/语音会上传给 {model_label}")
+    if excluded_count:
+        print(f"  (隐私基线过滤 {excluded_count} 个敏感项, 不进 02/03)")
 
     # 4) stat 补 ffprobe/EXIF 元数据(SourceItem.raw["stat_meta"])
     enriched: list[Any] = []
@@ -486,6 +517,8 @@ def main() -> int:
         msg += f", Live Photo 动态分量 {live_skipped} 个(配对后不单独入库)"
     if junk:
         msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
+    if excluded_count:
+        msg += f", 隐私基线排除 {excluded_count} 个敏感项(不进 02/03)"
     if content_kind:
         msg += f", 目录内容类型={content_kind}"
     msg += f", 数据源={args.source}"
