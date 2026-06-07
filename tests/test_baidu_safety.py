@@ -1,11 +1,15 @@
-"""PR #44 P1 防御测试(GPT-5.5 复审 #1)。
+"""PR #44 P1 防御测试(GPT-5.5 复审 #1) + P2 修复回归(GPT-5.5 复审 #2)。
 
-5 个防御点:
+5 个 P1 防御点:
 1. scope 校验: --input 必须在 cfg[source][baidu][root] 内
 2. 拒绝 --input == '/' 或空
 3. --i-know-what-im-doing opt-in
 4. depth cap: item.path 相对 root 段数 > BAIDU_MAX_DEPTH (10) → 丢弃
 5. item cap: listall 累计 > BAIDU_MAX_ITEMS (10000) → raise BaiduError
+
+P2 修复:
+6. token refresh: 老 credential(无 token_expires_at)收到 errno 110 → 触发 _do_refresh + 重试一次 → 成功
+7. token refresh: 二次调用仍返 errno 110 → raise BaiduError(不无限重试)
 
 不在本测试范围: 现有 7 个 Opus 验收 + 8 个 GPT-5.5 回归(在 test_netdisk_integration.py)。
 """
@@ -14,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -21,7 +26,13 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from adapters.source_baidu import BAIDU_MAX_DEPTH, BAIDU_MAX_ITEMS, BaiduError, BaiduSource  # noqa: E402
+from adapters.source_baidu import (  # noqa: E402
+    BAIDU_MAX_DEPTH,
+    BAIDU_MAX_ITEMS,
+    _MULTIMEDIA,
+    BaiduError,
+    BaiduSource,
+)
 from adapters.source_base import SourceItem  # noqa: E402
 
 
@@ -209,3 +220,89 @@ def test_baidu_item_cap_under_limit_passes(monkeypatch, tmp_path):
     monkeypatch.setattr(src, "_api", _fake_api)
     out = src._listall("/r")
     assert len(out) == under
+
+
+# ---------- 6) token refresh: errno 110 → _do_refresh + 重试一次成功 ----------
+# P2 修复(PR #44 GPT-5.5 复审 #2): 老 credential(无 token_expires_at)被吊销时
+# 百度返 errno 110;原 _TOKEN_ERRNOS = (111, -6) 不含 110,会直接 raise BaiduError。
+# 修复后:_TOKEN_ERRNOS 加 110 → 触发 _do_refresh + 重试一次 → 成功。
+
+def test_baidu_token_refresh_retries_on_errno_110(monkeypatch, tmp_path):
+    """老 credential 收到 errno 110 → _do_refresh + 重试 → 成功(不 raise)。
+
+    复现条件:
+    - cred 缺 token_expires_at → _token_expired() 返 False(未知有效期,不主动刷新)
+    - 第一次 _http_get_json 返 errno=110(百度吊销老 token)
+    - 第二次(重试)返 errno=0 + 正常数据
+    """
+    cred = tmp_path / "cred.json"
+    cred.write_text(json.dumps({
+        "app_key": "ak", "secret_key": "sk",
+        "access_token": "T1", "refresh_token": "R",
+        # 没有 token_expires_at → "老 credential" 标记
+    }), encoding="utf-8")
+    src = BaiduSource(cred_path=cred)
+    # 确认 _token_expired 返 False(未知有效期 → 不主动刷新)
+    assert src._token_expired() is False
+    assert BaiduSource._TOKEN_ERRNOS == (111, -6, 110)  # 110 必须在
+
+    # mock _do_refresh: 模拟刷新成功(换 access_token + 加 token_expires_at)
+    refresh_calls = {"n": 0}
+
+    def fake_do_refresh():
+        refresh_calls["n"] += 1
+        src._cred["access_token"] = "T2"
+        src._cred["token_expires_at"] = int(time.time()) + 3600
+        return "T2"
+    monkeypatch.setattr(src, "_do_refresh", fake_do_refresh)
+
+    # mock _http_get_json: 第一次 errno=110(老 token 失效),第二次 errno=0
+    call_log = {"n": 0, "tokens": []}
+
+    def fake_http(_base, params, where=""):
+        call_log["n"] += 1
+        call_log["tokens"].append(params.get("access_token", ""))
+        if call_log["n"] == 1:
+            assert params.get("access_token") == "T1"
+            return {"errno": 110, "list": []}
+        assert params.get("access_token") == "T2"
+        return {"errno": 0, "list": [], "has_more": False}
+    monkeypatch.setattr(src, "_http_get_json", fake_http)
+
+    # 不 raise,正常返回
+    out = src._api(_MULTIMEDIA, "listall", {"path": "/r"}, where="listall")
+    assert out["errno"] == 0
+    # 验证调用顺序: 第一次失败(用 T1)→ refresh → 第二次成功(用 T2)
+    assert refresh_calls["n"] == 1, "_do_refresh 应只被调用一次"
+    assert call_log["n"] == 2, "应调用 _http_get_json 两次(失败 + 重试)"
+    assert call_log["tokens"] == ["T1", "T2"], "token 应从 T1 → T2 轮换"
+
+
+# ---------- 7) token refresh: 二次仍 errno 110 → raise(不无限重试) ----------
+
+def test_baidu_token_refresh_raises_after_double_110(monkeypatch, tmp_path):
+    """refresh 后仍返 errno 110 → raise BaiduError(不能无限循环重试)。"""
+    cred = tmp_path / "cred.json"
+    cred.write_text(json.dumps({
+        "app_key": "ak", "secret_key": "sk",
+        "access_token": "T1", "refresh_token": "R",
+    }), encoding="utf-8")
+    src = BaiduSource(cred_path=cred)
+
+    def fake_do_refresh():
+        src._cred["access_token"] = "T2"
+        return "T2"
+    monkeypatch.setattr(src, "_do_refresh", fake_do_refresh)
+
+    # 两次都返 errno 110(模拟 refresh_token 也失效/被吊销)
+    call_log = {"n": 0}
+    def fake_http(_base, _params, where=""):
+        call_log["n"] += 1
+        return {"errno": 110, "list": []}
+    monkeypatch.setattr(src, "_http_get_json", fake_http)
+
+    with pytest.raises(BaiduError) as exc:
+        src._api(_MULTIMEDIA, "listall", {"path": "/r"}, where="listall")
+    assert exc.value.errno == 110
+    # 关键: 只调 2 次(初次 + 1 次重试),不能无限循环
+    assert call_log["n"] == 2, "必须 _retried 防重入,不能无限重试"

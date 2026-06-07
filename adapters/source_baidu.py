@@ -145,8 +145,9 @@ class BaiduSource(Source):
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode
 
-    # token 相关错误码:111=access_token 过期;-6=身份校验失败/无效 token
-    _TOKEN_ERRNOS = (111, -6)
+    # token 相关错误码:111=access_token 过期;-6=身份校验失败/无效 token;
+    # 110=access_token 失效(老 credential 无 token_expires_at 时被吊销 → 刷新一次重试)
+    _TOKEN_ERRNOS = (111, -6, 110)
 
     def _api(self, base: str, method: str, params: dict[str, Any], *, where: str,
              _retried: bool = False) -> dict[str, Any]:
