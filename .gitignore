@@ -37,3 +37,7 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code 本地上下文(协作规则在 collab repo,本文件 @import,绝不进 git)
+CLAUDE.md
+.claude/
