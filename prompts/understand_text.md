@@ -1,6 +1,6 @@
 # 文本融合 / 打标签提示词(M2.7)
 
-> 用于 `scripts/03_understand.py` 的 TextModel.summarize_and_tag。负责人:Opus 4.8。
+> 用于 `scripts/03_understand.py` 的 TextModel.summarize_and_tag。
 > 占位符:`{{VOCAB}}`、`{{VISION_JSON}}`(视觉模型输出)、`{{TRANSCRIPT}}`(ASR 全文,可空)、`{{METADATA}}`(时长/分辨率/拍摄时间等)。
 
 ## System

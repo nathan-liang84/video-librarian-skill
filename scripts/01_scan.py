@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """阶段1:盘点。遍历输入目录 → 内容指纹去重 → 读元数据 → 建/更新 manifest。
 
-负责人:GPT-5.4。
+
 
 要点:
 - 递归遍历,识别视频(mp4/mov/mkv/avi...)与照片(jpg/png/heic...)扩展名。
@@ -9,7 +9,7 @@
 - 视频用 ffprobe 取 时长/分辨率/fps/codec/创建时间/GPS;照片读 EXIF(拍摄时间/设备/GPS)。
 - 每个文件 upsert 一条 status=pending 的 Record 到 manifest。
 
-P1-N5 集成层(Atlas 2026-06-05):加 --source 开关 + 暴露 build_source / record_from_item 两个
+P1-N5 集成层:加 --source 开关 + 暴露 build_source / record_from_item 两个
 工厂/转换函数,让本地与网盘走同一条管线。改顶部加 from __future__ import annotations 以
 兼容 Python 3.9(本文件多个签名用了 str|None 联合类型;下游为本地或网盘记录,
 build_source 返回的 Source.list() 产出交由 record_from_item 转 Record 后 upsert 到 manifest)。
@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
 from lib.privacy import is_excluded, redact_path, require_scan_root  # noqa: E402,F401  (P1-N7 网盘隐私基线;redact_path 为 02-06 未来可调用预留)
 from lib.record import Record  # noqa: E402
-from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 - 读 HEIC/HEIF EXIF)
+from lib.imaging import register_heif  # noqa: E402  (P1a-B-2 集成 - 读 HEIC/HEIF EXIF)
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -251,7 +251,7 @@ def build_record(path: Path, media_type: str, *,
     )
 
 
-# ---------- P1-N5 集成层(Atlas) ----------
+# ---------- P1-N5 集成层 ----------
 
 def build_source(cfg: dict[str, Any], source: str | None = None) -> Any:
     """按 cfg/source 名构造一个 Source 适配器。

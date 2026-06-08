@@ -1,6 +1,6 @@
 """数据层适配器接口 —— 核心管线只依赖这个抽象,切换后端不动管线。
 
-负责人:接口 Opus 4.8;实现 GPT-5.4。
+
 """
 from __future__ import annotations
 

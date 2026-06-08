@@ -14,7 +14,7 @@
 写操作(rename/mkdir/collect/put_sidecar)默认抛 NotImplementedError —— 只读阶段(Phase 1)
 的数据源无需实现,Phase 2/3 再按后端补齐。
 
-负责人:Opus 4.8(契约)。字段/接口改动属协作章程契约红线,须走 Opus 评审。
+字段/接口改动属契约红线,变更须谨慎。
 """
 from __future__ import annotations
 

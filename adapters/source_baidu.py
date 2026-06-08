@@ -14,7 +14,7 @@
       不入库、不进 git、不在日志明文打印 token/secret。
 
 所有网络/子进程都经 `_http_get_json` / `_http_get_bytes` / `_run_ffmpeg` 三个 seam,便于测试 mock。
-负责人:Opus 4.8。对应 COLLAB #9(含 #10 抽帧核心)。
+
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ _LISTALL_LIMIT = 1000
 _FILEMETAS_CHUNK = 100
 _TRANSCODE_NOT_READY = 31341      # streaming:百度尚未转码,需重试退避
 
-# P1 防御(PR #44 GPT-5.5 复审): 限制 baidu list 避免误命令扫整个云盘。
+# P1 防御(PR #44 复审): 限制 baidu list 避免误命令扫整个云盘。
 # - BAIDU_MAX_DEPTH: 限制递归深度(item.path 以 root 为起点的 '/' 段数)。
 #   百度 listall API 的 recursion=1 是服务端整棵子树翻页,深度在客户端按 path 段数裁剪。
 # - BAIDU_MAX_ITEMS: 限制单次 list 返回的累计 item 数,超过 raise,提示用户缩小 scope。

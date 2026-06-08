@@ -1,6 +1,6 @@
 """模型客户端抽象层 —— "看画面"(M3)与"处理文本"(M2.7)解耦,便于换模型。
 
-负责人:Opus 4.8(抽象 + 提示词装配 + 严格 JSON 解析)。
+
 
 实现说明:
 - 默认走 OpenAI 兼容的 /chat/completions(base_url 在 config 配),MiniMax 提供兼容端点;

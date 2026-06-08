@@ -1,6 +1,6 @@
 # 脚本解析提示词(M2.7)
 
-> 用于 `scripts/06_match.py` 的 TextModel.parse_script。负责人:Opus 4.8。
+> 用于 `scripts/06_match.py` 的 TextModel.parse_script。
 > 占位符:`{{VOCAB}}`、`{{ROSTER}}`、`{{SCRIPT}}`。
 
 ## System

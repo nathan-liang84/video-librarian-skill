@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """阶段0:环境自检。检查 ffmpeg/ffprobe、Python 依赖、配置、数据层凭证是否就绪。
 
-缺什么报清楚 + 怎么装,绝不静默。负责人:GPT-5.4(可在此骨架上扩展)。
+缺什么报清楚 + 怎么装,绝不静默。
 
-P1-N5 集成层(Atlas 2026-06-05):加 ``probe_baidu_token(cred_path) -> dict`` 检查百度网盘
+P1-N5 集成层:加 ``probe_baidu_token(cred_path) -> dict`` 检查百度网盘
 凭证是否就绪(return 至少含 bool 'ok')。顶部加 ``from __future__ import annotations``
 兼容 Python 3.9(本文件多个签名用了 str|None 联合类型;探测在仓外凭证,返回
 guidance 文本给 run_all / 用户重新授权)。
@@ -113,7 +113,7 @@ def main() -> int:
     return 0 if all_ok else 1
 
 
-# ---------- P1-N5 集成层(Atlas):百度网盘 token 探测 ----------
+# ---------- P1-N5 集成层:百度网盘 token 探测 ----------
 
 _BAIDU_REAUTH_HINT = (
     "运行 baidu_oauth_setup.py 设备码授权获取 access_token + refresh_token,"

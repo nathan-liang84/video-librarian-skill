@@ -1,7 +1,6 @@
 """素材记录的数据结构与读写助手。
 
 契约:每条记录符合 schema/record.schema.json。各阶段(01→05)逐步填充字段并推进 status。
-负责人:Opus 4.8(契约设计) / 实现细节可由 GPT-5.4 补全。
 """
 from __future__ import annotations
 
@@ -38,7 +37,7 @@ class Record:
     # P1b-1: 目录级内容类型聚合。01_scan 扫描时根据目录下媒体类型推断并写入:
     #   仅视频 -> "video";仅照片 -> "photo";两者都有 -> "mixed"
     # 旧数据(None)消费者应回退到 media_type(见 effective_content_kind 属性)。
-    # 字段改动属章程 §8 契约红线,必走 Opus 评审。
+    # 字段改动属契约红线,变更须谨慎。
     content_kind: Optional[str] = None
     new_name: Optional[str] = None
     thumbnail: Optional[str] = None

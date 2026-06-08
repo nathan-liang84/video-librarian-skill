@@ -1,6 +1,6 @@
 """配置与词表加载。
 
-负责人:GPT-5.4(实现)。提供:
+提供:
 - load_config(path) -> dict
 - load_vocab(path) -> dict[str, list[str]]
 - validate_config(cfg):缺关键项(模型 key、store 凭证)时给清晰报错

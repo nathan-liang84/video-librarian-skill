@@ -1,6 +1,6 @@
 # 候选排序提示词(M2.7)
 
-> 用于 `scripts/06_match.py` 的 TextModel.rank_candidates。负责人:Opus 4.8。
+> 用于 `scripts/06_match.py` 的 TextModel.rank_candidates。
 > 在硬过滤之后调用:对已通过结构化过滤的候选,按与镜头需求的语义贴合度排序。
 > 占位符:`{{REQUIREMENT}}`(单个镜头需求 JSON)、`{{CANDIDATES}}`(候选记录精简数组:id/summary/description/scene/subjects/mood/shot_type/usable_clips)。
 
