@@ -1,8 +1,8 @@
-"""P1-N5 验收测试(Opus 出题):管线接线 + 本地旁车落点 + token 探测 + SourceItem→Record 传播。
+"""P1-N5 验收测试:管线接线 + 本地旁车落点 + token 探测 + SourceItem→Record 传播。
 
-Atlas 实现到 `pytest -q` 全绿,**不得删改/弱化**。
+实现到 `pytest -q` 全绿,**不得删改/弱化**。
 
-接口约定(Atlas 实现须满足):
+接口约定(实现须满足):
 - adapters/store_sidecar.SidecarAdapter:对**非 local 数据源**(网盘)的记录,旁车 JSON 必须落
   **本地 output_dir**,按 `record.id` 命名(`<output_dir>/<record.id>.json`),
   **绝不**用 record.path(远端路径)推算本地落点;本地记录(source 缺省/local)行为不变。

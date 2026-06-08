@@ -181,11 +181,11 @@ source:
 
 | # | 任务 | 归属 | 要点 / 边界 |
 |---|---|---|---|
-| **P1-N1** | **数据源适配器抽象 + 契约字段** | **Opus**(契约级) | 新增 `adapters/source_base.py`(`Source` ABC:`list/stat/frames/rename/mkdir/collect/put_sidecar`);schema/record 增 `source/remote_path/fs_id/remote_md5/collected_path`(均可选);`record.id` 仍由内容指纹派生(网盘用 `remote_md5`),`fs_id` 仅操作锚点。出 Opus 验收测试。 |
-| **P1-N2** | **LocalSource 重构** | **Atlas**(机械) | 把现有 `01_scan` 的 `os.walk`+ffprobe/EXIF 行为**零变化**包进 `LocalSource(Source)`;纳入 P1-N1 验收测试。 |
-| **P1-N3** | **BaiduSource:认证 + token 刷新 + list/stat** | **Opus**(网络/认证) | 从本地凭证文件读 token;过期用 refresh_token 自动续期;`list` 递归翻页 + `multimedia filemetas` 补 `md5/size/thumbs`;`record.id` 由 `remote_md5` 派生;限频退避。mock 测试,不打真实网盘。 |
-| **P1-N4** | **02_extract 网盘抽帧** | **Opus**(网络) | 视频:`streaming` 拿 M3U8 → ffmpeg 抽关键帧(处理 `31341` 转码未就绪重试/退避、UA、两次请求);照片:`dlink` 下载临时文件后本地抽,用完即删;封面 `thumbs` 兜底。 |
-| **P1-N5** | **管线接线 + 本地旁车落点 + token 探测** | **Atlas**(集成) | `01_scan` 接 `--source local\|baidu`;`05_store` 按 `source` 把网盘记录旁车落**本地 `output_dir`**(按 `record.id` 命名,**不写远端同目录**)+ 总表记 `remote_path/fs_id/md5`;`00_detect_env` 探测 token 有效性并给重新授权指引。纳入 Opus 验收测试。 |
+| **P1-N1** | **数据源适配器抽象 + 契约字段** | (契约级) | 新增 `adapters/source_base.py`(`Source` ABC:`list/stat/frames/rename/mkdir/collect/put_sidecar`);schema/record 增 `source/remote_path/fs_id/remote_md5/collected_path`(均可选);`record.id` 仍由内容指纹派生(网盘用 `remote_md5`),`fs_id` 仅操作锚点。出验收测试。 |
+| **P1-N2** | **LocalSource 重构** | (机械层) | 把现有 `01_scan` 的 `os.walk`+ffprobe/EXIF 行为**零变化**包进 `LocalSource(Source)`;纳入 P1-N1 验收测试。 |
+| **P1-N3** | **BaiduSource:认证 + token 刷新 + list/stat** | (网络/认证) | 从本地凭证文件读 token;过期用 refresh_token 自动续期;`list` 递归翻页 + `multimedia filemetas` 补 `md5/size/thumbs`;`record.id` 由 `remote_md5` 派生;限频退避。mock 测试,不打真实网盘。 |
+| **P1-N4** | **02_extract 网盘抽帧** | (网络) | 视频:`streaming` 拿 M3U8 → ffmpeg 抽关键帧(处理 `31341` 转码未就绪重试/退避、UA、两次请求);照片:`dlink` 下载临时文件后本地抽,用完即删;封面 `thumbs` 兜底。 |
+| **P1-N5** | **管线接线 + 本地旁车落点 + token 探测** | (集成层) | `01_scan` 接 `--source local\|baidu`;`05_store` 按 `source` 把网盘记录旁车落**本地 `output_dir`**(按 `record.id` 命名,**不写远端同目录**)+ 总表记 `remote_path/fs_id/md5`;`00_detect_env` 探测 token 有效性并给重新授权指引。纳入验收测试。 |
 
 > 依赖顺序:**P1-N1 → (P1-N2 ∥ P1-N3) → P1-N4 → P1-N5**。Phase 1 全绿即可对你的网盘"只读建库 + 本地总表记地址",对网盘零写入。
 

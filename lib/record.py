@@ -37,7 +37,7 @@ class Record:
     # P1b-1: 目录级内容类型聚合。01_scan 扫描时根据目录下媒体类型推断并写入:
     #   仅视频 -> "video";仅照片 -> "photo";两者都有 -> "mixed"
     # 旧数据(None)消费者应回退到 media_type(见 effective_content_kind 属性)。
-    # 字段改动属章程 §8 契约红线,必走 Opus 评审。
+    # 字段改动属契约红线,变更须谨慎。
     content_kind: Optional[str] = None
     new_name: Optional[str] = None
     thumbnail: Optional[str] = None

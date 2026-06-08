@@ -2,6 +2,8 @@
 """阶段4:校验受控标签 + 生成简短新文件名 + 安全改名(可回滚)。
 
 
+高风险:改名不可逆,回滚必须可靠。
+
 用法:
   python scripts/04_tag_name.py                 # 默认 dry-run,仅预览 旧名→新名
   python scripts/04_tag_name.py --apply         # 执行改名,写 state/rename_log.json
