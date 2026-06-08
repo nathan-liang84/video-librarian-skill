@@ -1,6 +1,6 @@
 # 视觉理解提示词(M3)
 
-> 用于 `scripts/03_understand.py` 的 VisionModel.analyze。负责人:Opus 4.8。
+> 用于 `scripts/03_understand.py` 的 VisionModel.analyze。
 > 占位符在运行时替换:`{{ROSTER}}` 人物名册、`{{VOCAB}}` 受控词表、`{{MEDIA_TYPE}}`、`{{FRAME_COUNT}}`。
 > 输入消息里依次附:① 主角/关系人参考图(标注姓名)② 待分析的关键帧/照片。
 

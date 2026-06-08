@@ -3,14 +3,14 @@ PyYAML>=6.0            # 读配置/词表
 Pillow>=10.0           # 缩略图、图片处理
 pillow-heif>=0.16      # HEIC/HEIF 解码(供 lib/imaging.normalize_photo 使用;可选,未装也能跑)
 imagehash>=4.3         # 感知哈希 pHash(供 lib/triage.phash 使用;可选,未装则近重复归组返 None/各成组)
-piexif>=1.1            # 照片 EXIF 读取(或用 exifread)
 openpyxl>=3.1          # 写 Excel 总表
 
 # 媒体处理(ffmpeg/ffprobe 为系统级依赖,需另行安装)
 # 抽帧/抽音轨通过 subprocess 调 ffmpeg,无需 Python 绑定;如需可加 ffmpeg-python
 
-# 语音转写(本地优先)
-faster-whisper>=1.0    # 本地 ASR;无 GPU 也可 CPU 跑小模型
+# 语音转写(可选,重依赖:含 CTranslate2 + 首次会下载模型权重)
+# 需要"画面 + 语音"双通道时再装;不装则自动跳过语音转写,视频仍抽帧理解,照片不受影响。
+# faster-whisper>=1.0
 
 # 模型客户端
 requests>=2.31         # 调 MiniMax / 飞书 REST API

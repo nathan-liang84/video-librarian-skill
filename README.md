@@ -1,8 +1,10 @@
 # VideoLibrarian — 视频/照片素材智能整理 Skill
 
+[![tests](https://github.com/nathan-liang84/video-librarian-skill/actions/workflows/tests.yml/badge.svg)](https://github.com/nathan-liang84/video-librarian-skill/actions/workflows/tests.yml)
+
 一套**跨 Agent 平台通用的 Skill**(OpenClaw / Codex / Claude Code 均可调用):自动"读懂"大量视频与照片素材 → 总结 + 打标签 + 规范命名 → 汇总成可检索的素材总表 → 按剪辑脚本快速匹配可用素材。
 
-> 设计文档见 [PRD.md](PRD.md)。任务拆解与协作分工见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
+> 设计文档见 [PRD.md](PRD.md)。
 
 ## 它解决什么
 
@@ -34,16 +36,18 @@
 video-librarian-skill/
 ├── SKILL.md              # Agent 读这个:技能说明 + 调用流程
 ├── PRD.md                # 产品需求文档
-├── config/               # 配置(数据层、命名、抽帧、模型、人物名册)+ 受控词表
+├── config/               # 配置(数据层/命名/抽帧/模型/人物名册)+ 受控词表 vocab.yaml;refs/ 存参考图(gitignore)
 ├── schema/               # 素材记录 JSON Schema(各阶段共享契约)
-├── lib/                  # 共享库:记录、状态清单、模型客户端抽象
-├── adapters/             # 数据层适配器:飞书 / 旁车
-├── scripts/              # 管线各阶段 00–06
-├── docs/                 # 任务拆解 / 协作分工
-└── state/               # 运行状态(manifest / rename_log,默认 gitignore)
+├── lib/                  # 共享库:记录、状态清单、配置、模型客户端抽象、影像/分诊
+├── adapters/             # 数据层与数据源适配器:飞书 / JSON 旁车 / 本地目录读入(source_local)
+├── prompts/              # 多模态与文本提示词(画面理解、文本理解、脚本匹配)
+├── scripts/              # 管线各阶段 00–06 + run_all / 工具脚本
+├── docs/                 # 扩展文档(如 PHOTO_PIPELINE.md 照片管线)
+├── tests/                # 测试(CI 每次 PR 自动跑)
+└── state/                # 运行状态(manifest / rename_log,默认 gitignore)
 ```
 
-## 快速开始(开发中)
+## 快速开始
 
 ```bash
 pip install -r requirements.txt
@@ -65,9 +69,19 @@ python scripts/01_scan.py  --input /path/to/media   # 盘点
 
 Windows 备注:`faster-whisper` 等依赖均有 Windows 轮子,CPU 可跑;文件名已按 Windows 禁用字符清洗;改名优先硬链接,FAT32/exFAT 外接盘自动回退为移动(均不覆盖同名文件)。
 
-## 协作方式
+## 隐私与安全
 
-本仓库由多模型协作开发:架构与高风险逻辑由 Opus 4.8 负责,常规开发由 GPT-5.4(Codex)负责,代码检查见 [docs/TASK_BREAKDOWN.md](docs/TASK_BREAKDOWN.md)。
+本 skill 处理的是你的私人素材(可能含人物、住址、证件等敏感画面),请先了解数据流向:
+
+- **画面与语音默认会发送到云端模型**:理解阶段(03)把视频关键帧、照片、ASR 文本发送到你在 `config.yaml` 配置的模型 API(默认 MiniMax M3 / M2.7,也可换任意 OpenAI 兼容 provider)进行分析——**这些内容会离开本机**到达对应服务商,请确认你接受其数据政策。
+- **想完全本地化**:把 `models.*.provider` 配成本地服务(如 `ollama` / `vLLM` + 自填 `base_url`),语音用本地 `faster-whisper`,素材就**不出本机**。
+- **密钥与个人数据只存本地、绝不进 git**:`config/config.yaml`(API key / 飞书凭证)、`config/refs/`(主角参考图)、`config/faces/`(人脸数据)、`output/`(旁车结果)、`state/` 均已 `.gitignore`,不会被提交。
+- **发行版不含任何个人信息**:不预设任何主角名或人脸数据;人物名册与参考图全部由你在本地配置。
+- **数据落点你自己掌握**:旁车模式结果写本地 `output/`;飞书模式写入**你自己租户**的多维表格。本 skill 不向作者或任何第三方回传你的数据。
+
+## 贡献
+
+欢迎 issue 与 PR。改动若涉及 `schema/record.schema.json` 或受控词表 `config/vocab.yaml`,请在 PR 中说明对各阶段契约的影响。
 
 ## License
 

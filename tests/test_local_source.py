@@ -1,6 +1,6 @@
-"""P1-N2 验收测试(Opus 出题):LocalSource —— 现有 01_scan 行为零变化包进 Source 接口。
+"""P1-N2 验收测试:LocalSource —— 现有 01_scan 行为零变化包进 Source 接口。
 
-Atlas 实现到 `pytest -q` 全绿,**不得删改/弱化**。
+实现到 `pytest -q` 全绿,**不得删改/弱化**。
 
 接口约定:
 - adapters/source_local.py 暴露 LocalSource(Source),name="local",可无参实例化。
@@ -62,7 +62,7 @@ def test_record_id_parity_with_01_scan(tmp_path):
     assert items[0].record_id == expected
 
 
-# ---------- 4. (GPT-5.5 P1 回归) 视频 stat 不出 NameError ----------
+# ---------- 4. (P1 回归) 视频 stat 不出 NameError ----------
 
 def test_video_stat_does_not_raise_nameerror(tmp_path, monkeypatch):
     """【P1 回归】ffprobe 返有效 JSON 时,stat(video) 不应跳 NameError。
@@ -109,7 +109,7 @@ def test_video_stat_does_not_raise_nameerror(tmp_path, monkeypatch):
     assert meta.get("codec") == "h264"
 
 
-# ---------- 5. (GPT-5.5 P2-1 回归) Live Photo 配对透传到 raw ----------
+# ---------- 5. (P2-1 回归) Live Photo 配对透传到 raw ----------
 
 def test_live_photo_pairing_marks_motion_skip_and_photo_path(tmp_path):
     """【P2-1 回归】同主名 HEIC + .mov 应配对:
@@ -149,7 +149,7 @@ def test_live_photo_pairing_marks_motion_skip_and_photo_path(tmp_path):
     assert "status" not in other_it.raw
 
 
-# ---------- 6. (GPT-5.5 P2-2 回归) 照片 frames 不依赖 ffmpeg + 调对函数名 ----------
+# ---------- 6. (P2-2 回归) 照片 frames 不依赖 ffmpeg + 调对函数名 ----------
 
 def test_photo_frames_does_not_require_ffmpeg(tmp_path, monkeypatch):
     """【P2-2 回归】frames(photo) 在 ffmpeg 不可用时仍应返回非空列表(归一化/copy 兑底)；
@@ -197,7 +197,7 @@ def test_photo_frames_does_not_require_ffmpeg(tmp_path, monkeypatch):
     assert out[0].read_bytes() == b"NORMALIZED-JPEG-BYTES"
 
 
-# ---------- 7. (GPT-5.5 P2-3 回归) 照片无 EXIF shot_at 走 mtime 兑底 ----------
+# ---------- 7. (P2-3 回归) 照片无 EXIF shot_at 走 mtime 兑底 ----------
 
 def test_photo_shot_at_falls_back_to_mtime_when_exif_missing(tmp_path, monkeypatch):
     """【P2-3 回归】exif.get(36867) / exif.get(306) 均为 None 时,stat() 不应写

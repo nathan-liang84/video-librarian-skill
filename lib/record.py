@@ -1,7 +1,6 @@
 """素材记录的数据结构与读写助手。
 
 契约:每条记录符合 schema/record.schema.json。各阶段(01→05)逐步填充字段并推进 status。
-负责人:Opus 4.8(契约设计) / 实现细节可由 GPT-5.4 补全。
 """
 from __future__ import annotations
 
@@ -38,7 +37,7 @@ class Record:
     # P1b-1: 目录级内容类型聚合。01_scan 扫描时根据目录下媒体类型推断并写入:
     #   仅视频 -> "video";仅照片 -> "photo";两者都有 -> "mixed"
     # 旧数据(None)消费者应回退到 media_type(见 effective_content_kind 属性)。
-    # 字段改动属章程 §8 契约红线,必走 Opus 评审。
+    # 字段改动属契约红线,变更须谨慎。
     content_kind: Optional[str] = None
     new_name: Optional[str] = None
     thumbnail: Optional[str] = None
@@ -48,7 +47,7 @@ class Record:
 
     # 数据源(网盘 Phase 1):本地记录留默认(source=None ⇒ 视作 "local")。
     # record.id 仍是内容身份(网盘记录由 remote_md5 派生);fs_id 仅网盘操作锚点,不入 id。
-    # 详见 docs/NETDISK_PIPELINE.md §2/§6。字段改动属章程 §8 契约红线,必走 Opus 评审。
+    # 这些为前向兼容的可空字段;本地记录恒为 None。
     source: Optional[str] = None          # "local"(默认/缺省) | "baidu"
     remote_path: Optional[str] = None     # 网盘内当前路径(人读;改名/归集后会变)
     fs_id: Optional[str] = None           # 网盘操作锚点(rename/move/copy);不是 record.id

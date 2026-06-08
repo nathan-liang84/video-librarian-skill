@@ -10,7 +10,7 @@
     "content_kind": {
       "type": ["string", "null"],
       "enum": ["video", "photo", "mixed", null],
-      "description": "P1b-1: 目录级内容类型。01_scan 聚合扫描目录下所有媒体的 media_type 后写入 —— 仅视频=video、仅照片=photo、两者都有=mixed。旧数据(null)消费者应回退到 media_type。改字段必走 Opus 评审(章程 §8)。"
+      "description": "P1b-1: 目录级内容类型。01_scan 聚合扫描目录下所有媒体的 media_type 后写入 —— 仅视频=video、仅照片=photo、两者都有=mixed。旧数据(null)消费者应回退到 media_type。改字段须谨慎(契约红线)。"
     },
     "original_name": { "type": "string" },
     "new_name": { "type": ["string", "null"], "description": "规范化新文件名(简短)" },

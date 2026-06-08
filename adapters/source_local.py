@@ -3,7 +3,7 @@
 把现有 `scripts/01_scan.py` 的"递归枚举 + 内容指纹 + 媒体类型分流"行为
 **零变化**包进 `Source` 接口,让 01 起各阶段既能跑本地目录、也能跑网盘(BaiduSource)。
 
-**负责人:Atlas(机械层 / 集成)。** 设计由 Opus 4.8 协调,见 `docs/NETDISK_PIPELINE.md` §4/§12。
+本地目录读入适配器:把读取行为收敛到 `Source` 接口,便于未来平滑扩展其它数据源。
 
 ### 设计要点
 1. **零行为变化**:`list(root)` 的 SHA1 算法、扩展名集合、junk 过滤规则与
@@ -38,7 +38,13 @@ sys.path.insert(0, str(_ROOT))
 
 from lib.imaging import register_heif  # noqa: E402
 
-from .source_base import Source, SourceItem  # noqa: E402
+from .source_base import (  # noqa: E402
+    Source,
+    SourceItem,
+    _LIVE_MOTION_EXTS,
+    _LIVE_STILL_EXTS,
+    pair_live_photos,
+)
 
 
 # ---------- 与 scripts/01_scan.py 字节对齐的判定集 ----------
@@ -51,10 +57,11 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 # Windows 系统垃圾(不以 '.' 开头,按文件名整体匹配,大小写不敏感)
 _WIN_JUNK = {"thumbs.db", "desktop.ini", "ehthumbs.db"}
 
-# Live Photo 配对判定集:与 01_scan._LIVE_MOTION_EXTS / _LIVE_STILL_EXTS 字节对齐
-# (P2-1 复审修复: 丢失配对会破坏零行为变化)。
-_LIVE_MOTION_EXTS = {".mov"}
-_LIVE_STILL_EXTS = {".heic", ".heif", ".jpg", ".jpeg"}
+# Live Photo 配对判定集从 source_base 导入(共享 helper 维护单一真源)
+# - 行为与 01_scan._LIVE_MOTION_EXTS / _LIVE_STILL_EXTS 字节对齐
+# - LocalSource 与 BaiduSource 都走共享 helper(见 #12 P1-N6),保证两源配对判定一致
+_LIVE_MOTION_EXTS = _LIVE_MOTION_EXTS
+_LIVE_STILL_EXTS = _LIVE_STILL_EXTS
 
 
 def _is_junk_name(name: str) -> bool:
@@ -252,9 +259,11 @@ class LocalSource(Source):
 
     def _iter_media(self, root: Path) -> Iterator[SourceItem]:
         """惰性生成器:大目录不必一次读完。"""
-        # 与 01_scan.main 第一遍 rglob + is_junk_name + detect_media_type 一致;
-        # 不预排序(01_scan 内部 sorted;测试只对集合断言,顺序无关)
-        for path in root.rglob("*"):
+        # 与 01_scan.main 第一遍 rglob + is_junk_name + detect_media_type 字节对齐;
+        # 显式 sorted() 恢复稳定顺序(a.jpg 在 b.jpg 前)—— 与旧 01_scan.main()
+        # 第一遍的 `sorted(input_dir.rglob("*"))` 一致;否则 dedup 时的"留下第一个"
+        # 行为依赖文件系统,test_scan_builds_manifest_and_skips_duplicates 失败。
+        for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
             media_type = _detect_media_type(path)
@@ -273,49 +282,26 @@ class LocalSource(Source):
             )
 
     @staticmethod
-    def _pair_live_photos(items: list[SourceItem]) -> dict[Path, Path]:
-        """Live Photo 配对:与 ``01_scan.pair_live_photos`` 字节对齐。
+    def _pair_live_photos(items: list[SourceItem]) -> tuple[list[SourceItem], int]:
+        """【已迁出】Live Photo 配对逻辑已上提为 ``source_base.pair_live_photos`` 共享 helper。
 
-        判定:同目录、同主名(不分大小写)下【恰好】1 张 Live Photo 静态图
-        (HEIC/JPEG)+ 1 个 .mov 才配对。歧义(多张静态 / 多个 .mov)不配,
-        避免误伤真实视频。
+        保留此薄包装仅用于内部/外部可能的直接调用方过渡(LocalSource 的 list() 已切到
+        ``_iter_with_live_photo_pairing`` → 共享 helper)。新代码请直接 import 共享 helper。
 
-        返回:``{motion_path: photo_path}``。调用方负责在 SourceItem.raw 上标 metadata。
+        行为 100% 等价于旧版(groups / setdefault / setdefault status 字节对齐)。
         """
-        groups: dict[tuple[str, str], dict[str, list[Path]]] = {}
-        for it in items:
-            p = Path(it.path)
-            stem = p.stem.lower()
-            key = (str(p.parent), stem)
-            bucket = groups.setdefault(key, {"photo": [], "motion": []})
-            suffix = p.suffix.lower()
-            if it.media_type == "photo" and suffix in _LIVE_STILL_EXTS:
-                bucket["photo"].append(p)
-            elif suffix in _LIVE_MOTION_EXTS:
-                bucket["motion"].append(p)
-        pairs: dict[Path, Path] = {}
-        for bucket in groups.values():
-            if len(bucket["photo"]) == 1 and len(bucket["motion"]) == 1:
-                pairs[bucket["motion"][0]] = bucket["photo"][0]
-        return pairs
+        return pair_live_photos(items)
 
     def _iter_with_live_photo_pairing(self, items: list[SourceItem]) -> Iterator[SourceItem]:
         """对 raw 枚举结果加 Live Photo 配对标记,最后再产出。
 
-        静态照片: ``raw["live_motion_path"]`` = 配对 .mov 绝对路径。
-        动态 .mov: ``raw["status"]`` = ``"live_motion_skip"``(分支终态)。
-        未配对:保持原样。
+        委托 ``source_base.pair_live_photos``(共享 helper,BaiduSource 同款):
+        - 静态照片: ``raw["live_motion_path"]`` = 配对 .mov 绝对路径
+        - 动态 .mov: ``raw["status"]`` = ``"live_motion_skip"``(分支终态)
+        - 未配对:保持原样
         """
-        pairs = self._pair_live_photos(items)  # {motion: photo}
-        photo_to_motion = {photo: motion for motion, photo in pairs.items()}
-        for it in items:
-            p = Path(it.path)
-            if p in pairs:                       # 动态 .mov 侧
-                it.raw.setdefault("status", "live_motion_skip")
-                it.raw["live_motion_pair"] = str(pairs[p])  # 调试/追溯用
-            elif p in photo_to_motion:           # 静态照片侧
-                it.raw["live_motion_path"] = str(photo_to_motion[p])
-            yield it
+        marked, _paired = pair_live_photos(items)
+        yield from marked
 
     # ---- 读:stat(补 ffprobe / EXIF 元数据)----
 

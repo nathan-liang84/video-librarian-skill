@@ -1,8 +1,8 @@
-"""P1b-C 验收测试(Opus 出题):scripts/01b_photo_triage.py 集成行为。
+"""P1b-C 验收测试:scripts/01b_photo_triage.py 集成行为。
 
-测试先行 —— Atlas 实现到 `pytest -q` 全绿,**不得删改/弱化**(改了视为不通过)。
+测试先行 —— 实现到 `pytest -q` 全绿,**不得删改/弱化**(改了视为不通过)。
 
-接口约定(Atlas 实现须满足):
+接口约定(实现须满足):
 - `scripts/01b_photo_triage.py` 暴露 `main() -> int`(成功返 0)。
 - argparse:`--manifest`(默认 state/manifest.json)、`--include-junk`(flag)。**不需要 --config。**
 - 只处理 `media_type=="photo"` 且 `status=="pending"` 的记录;其它(视频、非 pending)一律不动。
@@ -192,7 +192,7 @@ def test_include_junk_reprocesses_and_recovers(tmp_path, monkeypatch):
     assert after.is_junk in (None, False)
 
 
-# ---------- 6. (GPT-5.5 P2 回归) 选代表透传 resolution / has_exif ----------
+# ---------- 6. (P2 回归) 选代表透传 resolution / has_exif ----------
 
 def test_pick_representative_prefers_higher_resolution(tmp_path, monkeypatch):
     """【P2 回归】连拍组里【后入场的高分辨率成员】应被选为代表(而非 manifest 顺序)。
@@ -240,7 +240,7 @@ def test_pick_representative_prefers_higher_resolution(tmp_path, monkeypatch):
     assert low_after.group_size == 2
 
 
-# ---------- 7. (GPT-5.5 P3 回归) 垃圾不调 phash ----------
+# ---------- 7. (P3 回归) 垃圾不调 phash ----------
 
 def test_junk_records_skip_phash(tmp_path, monkeypatch):
     """【P3 回归】垃圾照片【不应】触发 ``triage.phash()`` 调用。

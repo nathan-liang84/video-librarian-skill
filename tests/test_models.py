@@ -70,7 +70,7 @@ def test_pure_text_raises_with_raw_snippet():
 def test_truncated_json_raises():
     # 被截断的 JSON(max_tokens 太小的典型症状)→ 报错而非静默返回半个结果
     with pytest.raises(ValueError):
-        _extract_json('{"scene": ["健身房"], "subjects": ["寸寸"')
+        _extract_json('{"scene": ["健身房"], "subjects": ["Alice"')
 
 
 def test_truncated_outer_with_complete_inner_array_raises():

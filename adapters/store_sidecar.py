@@ -5,7 +5,7 @@
 - 汇总成 output/_素材总表.xlsx
 - rebuild_summary 可仅从旁车 .json 重建总表
 
-负责人:GPT-5.4。
+
 """
 from __future__ import annotations
 
@@ -36,6 +36,23 @@ class SidecarAdapter(StoreAdapter):
         self.media_roots = [Path(root) for root in configured_roots]
 
     def _sidecar_path(self, record: Record) -> Path:
+        """推算记录旁车的落点。
+
+        分支:
+        - **非 local 数据源**(网盘, record.source ∈ {"baidu", ...} 且非 None / 非 "local"):
+          旁车落 **本地 output_dir**,按 ``record.id`` 命名
+          (``<output_dir>/<record.id>.json``)。**绝不**用 record.path(远端路径)推算本地落点。
+        - **local 记录**(source 缺省 / "local" / None):原有行为 —— 旁车在素材同目录,
+          以 ``new_name`` 或原文件名的 stem 为名(随文件走、搬家不丢元数据)。
+        """
+        # P1-N5: 网盘记录旁车强制走本地 output_dir,按 record.id 命名。
+        # 这样远端路径不可写也不会报错,按 id 落点也能在重跑时精确定位。
+        src = (record.source or "local").lower()
+        if src != "local":
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            return self.output_dir / f"{record.id}.json"
+
+        # local 路径:沿用旧行为 —— 旁车在素材同目录。
         media_path = Path(record.path)
         basename = Path(record.new_name or media_path.name).stem
         return media_path.with_name(f"{basename}.json")

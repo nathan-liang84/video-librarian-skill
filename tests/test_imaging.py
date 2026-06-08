@@ -1,6 +1,6 @@
 """lib.imaging 单元测试。
 
-负责人:Atlas(MiniMax M3,机械层)。覆盖:
+覆盖:
 - normalize_photo 摆正 + 转 RGB JPEG
 - normalize_photo 对缺失/损坏文件优雅降级(返回 False,不抛)
 - heif_available / register_heif 幂等、不抛

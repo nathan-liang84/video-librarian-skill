@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """阶段2:抽取。视频抽关键帧 + 抽音轨→ASR;照片直读;生成缩略图/雪碧图。
 
-负责人:GPT-5.4。
+
 
 抽帧策略(读 config.extract):
 - 场景切换检测 ffmpeg select='gt(scene,<scene_threshold>)' 为主
@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
-from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 — 照片归一化)
+from lib.imaging import register_heif  # noqa: E402  (集成 — 照片归一化)
 
 
 def _target_frame_cap(record, cfg: dict) -> int:
@@ -94,6 +94,17 @@ def _extract_audio(record, workdir: Path) -> Path | None:
     return audio_path if ok and audio_path.exists() else None
 
 
+def _asr_available(cfg: dict) -> bool:
+    """ASR 是否可用(provider 为 faster-whisper 且可 import)。可选能力,缺失走降级。"""
+    if cfg.get("models", {}).get("asr", {}).get("provider", "faster-whisper") != "faster-whisper":
+        return False
+    try:
+        import faster_whisper  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _transcribe(audio_path: Path | None, cfg: dict) -> tuple[str | None, bool]:
     if audio_path is None:
         return None, False
@@ -101,12 +112,14 @@ def _transcribe(audio_path: Path | None, cfg: dict) -> tuple[str | None, bool]:
     asr_cfg = cfg.get("models", {}).get("asr", {})
     provider = asr_cfg.get("provider", "faster-whisper")
     if provider != "faster-whisper":
-        raise RuntimeError(f"暂不支持 ASR provider: {provider}")
+        # 未支持的 ASR provider:降级跳过(不崩管线;由 main 统一提示)
+        return None, False
 
     try:
         from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError("缺少 faster-whisper,请先安装 requirements.txt") from exc
+    except ImportError:
+        # ASR 为可选能力,未安装则降级为"无字幕",视频仍抽帧理解(由 main 统一提示)
+        return None, False
 
     model = WhisperModel(asr_cfg.get("model", "small"),
                          device=asr_cfg.get("device", "auto"))
@@ -208,7 +221,10 @@ def _extract_record(record, workdir: Path, cfg: dict) -> None:
     if cfg.get("extract", {}).get("make_sprite", True):
         record.sprite = _make_sprite(frames, workdir, record.id)
 
-    transcript, has_speech = _transcribe(_extract_audio(record, workdir), cfg)
+    try:
+        transcript, has_speech = _transcribe(_extract_audio(record, workdir), cfg)
+    except Exception:  # noqa: BLE001  ASR 运行期失败 → 降级为无字幕,不丢已抽好的帧
+        transcript, has_speech = None, False
     record.transcript = transcript
     record.has_speech = has_speech
     record.status = "extracted"
@@ -228,6 +244,10 @@ def main() -> int:
     if not todo:
         print("没有待抽取的记录。")
         return 0
+
+    if any(r.media_type == "video" for r in todo) and not _asr_available(cfg):
+        print("  (提示:ASR 不可用——未装 faster-whisper 或 provider 不支持;"
+              "本次跳过语音转写,视频仍会抽帧理解。需要语音:pip install faster-whisper)")
 
     for record in todo:
         try:

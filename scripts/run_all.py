@@ -26,6 +26,8 @@ def main() -> int:
     ap.add_argument("--manifest", default="state/manifest.json")
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--workdir", default="tmp")
+    ap.add_argument("--source", choices=["local", "baidu"], default="local",
+                    help="数据源:local=本地目录(默认),baidu=百度网盘(需 cfg[source][baidu][cred_path])")
     ap.add_argument("--tier", choices=["quick", "refine"], default=None)
     ap.add_argument("--apply-rename", action="store_true",
                     help="确认 dry-run 结果后,真正执行改名并继续入库")
@@ -35,9 +37,26 @@ def main() -> int:
     args = ap.parse_args()
 
     _run("00_detect_env.py")
-    input_path = str(Path(args.input).resolve())
+    input_path = str(Path(args.input).resolve()) if args.source == "local" else args.input
 
-    _run("01_scan.py", "--input", input_path, "--manifest", args.manifest)
+    # P1-N5: 传 --source 给 01_scan,让 local/baidu 走同一份主流程
+    _run("01_scan.py", "--input", input_path, "--manifest", args.manifest,
+         "--source", args.source, "--config", args.config)
+
+    # P1 复审修复(PR #39 第二轮): --source baidu 模式下 01 后停止。
+    # 02/03/04/05 仍走本地 ffmpeg/PIL,会把网盘远端路径直接喂本地工具,远端记录会
+    # 全炸。Phase 1 对网盘零写入的承诺:baidu 模式只产 manifest(每条 record 含
+    # source=baidu / remote_path / fs_id),旁车由 05_store 手动跑:
+    #   python3 scripts/05_store.py --manifest state/manifest.json --config config/config.yaml
+    # 05_store 的 SidecarAdapter 已接非 local 数据源走 output_dir/<id>.json(本 PR 之前那轮改的)。
+    # 后续 Phase 2 接 02_extract 网盘抽帧 / 03_understand 网盘理解需要更大的接入改动,不在 #11 范围。
+    if args.source == "baidu":
+        print(
+            "\n[run_all] --source baidu: 01 完成, 02-05 跳过(避免本地工具吃到远端路径)。"
+            "网盘记录的旁车由 05_store 单独跑落地(Phase 1 对网盘零写入)。"
+        )
+        return 0
+
     _run("02_extract.py", "--manifest", args.manifest,
          "--config", args.config, "--workdir", args.workdir)
 

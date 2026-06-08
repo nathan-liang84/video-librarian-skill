@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """阶段 1b:照片分诊(集成层)。
 
-**负责人:Atlas(机械层 / 集成)。**
-
 职责:在调模型之前(成本控制点)做"砍量+归一":
 1. **垃圾启发式**:`lib.triage.classify_content` 判定 → 标 ``is_junk``/``junk_reason``,``status=junk``。
 2. **近重复归组**:对非垃圾照片 pHash + 时间近邻归组,挑代表;非代表成员 ``status=grouped``。
 3. **独立照片**保持 ``status=pending``,不设 group 字段。
 
-### 接缝契约(由 Opus 在 PR #30/#31 设计并落地,本脚本照此置值即可)
+### 接缝契约(本脚本照此置值即可)
 - **垃圾** → ``is_junk=True`` + ``junk_reason=<短码>`` + ``status="junk"``
   02/03/04 自动跳过;05 自动存最小记录;06 自动不召回。
 - **近重复/连拍组(N>1)**:
