@@ -56,14 +56,14 @@ source:
 # 用其他服务(含本地 ollama/vLLM)只需 provider: local + 自填 base_url。
 models:
   vision:                  # 看画面:【必须支持图像输入】
-    provider: minimax      # minimax | qwen | doubao | openai | local ...
-    model: MiniMax-M3      # 例:Qwen-VL → qwen-vl-plus;豆包 → doubao-vision-pro;OpenAI → gpt-4o
+    provider: ""           # 必填,任选其一:minimax | qwen | doubao | openai | local ...
+    model: ""              # 必填:你选的视觉/多模态模型名(例:qwen-vl-plus / doubao-vision-pro / gpt-4o / 本地模型名)
     api_key: ""
     base_url: ""           # 留空则用 provider 默认;local 必填
     max_frames_per_video: 36
   text:                    # 纯文本:总结/打标签/脚本匹配(选便宜的)
-    provider: minimax
-    model: MiniMax-M2.7    # 例:qwen-plus / deepseek-chat / gpt-4o-mini
+    provider: ""           # 必填,可与 vision 同家或换更便宜的
+    model: ""              # 必填:你选的文本模型名(例:qwen-plus / deepseek-chat / gpt-4o-mini)
     api_key: ""
     base_url: ""
   asr:
