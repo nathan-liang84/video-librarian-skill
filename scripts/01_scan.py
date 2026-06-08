@@ -27,6 +27,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.manifest import Manifest  # noqa: E402
+from lib.privacy import is_excluded, redact_path, require_scan_root  # noqa: E402,F401  (P1-N7 网盘隐私基线;redact_path 为 02-06 未来可调用预留)
 from lib.record import Record  # noqa: E402
 from lib.imaging import register_heif  # noqa: E402  (Atlas: P1a-B-2 集成 - 读 HEIC/HEIF EXIF)
 
@@ -342,6 +343,34 @@ def record_from_item(item: Any, *, source: str) -> Any:
     )
 
 
+def _effective_source_cfg(cfg: dict[str, Any], cli_source: str | None) -> dict[str, Any]:
+    """P1 防御(PR #46 复审 #1): 合并 CLI ``--source`` 跟 cfg,得到 effective source cfg。
+
+    **不依赖 cfg 里的 ``source.type`` 字面值**。如果 CLI 传了 ``--source baidu``,
+    即使 cfg 里 ``source.type`` 是 ``local``(或缺失),effective source 仍是 baidu,
+    此时 ``require_scan_root`` 必须看 baidu 段;否则攻击场景:cfg 是 local 默认
+    (无 baidu 配置) + CLI ``--source baidu --input / --i-know-what-im-doing`` 会
+    跳过 root 校验 + scope 校验,直接调 baidu source 扫全盘。
+
+    合并规则:
+    - 拷一份 cfg(不原地改)
+    - ``source.type`` 取 cli_source(优先)或 cfg
+    - 如果 effective type 是 baidu 且 cfg 缺 ``baidu`` 段,补一个空段
+      (让 ``require_scan_root`` 能看到 ``baidu.root == None`` 然后 raise)
+    """
+    merged: dict[str, Any] = dict(cfg) if isinstance(cfg, dict) else {}
+    src_section: dict[str, Any] = dict(merged.get("source") or {})
+    if not isinstance(src_section, dict):
+        src_section = {}
+    if cli_source:
+        src_section["type"] = cli_source
+    # type=baidu 但缺 baidu 段 → 补空段(让 root 校验能看到)
+    if src_section.get("type") == "baidu" and not isinstance(src_section.get("baidu"), dict):
+        src_section["baidu"] = {}
+    merged["source"] = src_section
+    return merged
+
+
 def _validate_baidu_scope(input_path: str, cfg: dict[str, Any], *,
                           opt_in: bool) -> str:
     """P1 防御(PR #44): 校验 --input 必须在 cfg[source][baidu][root] 范围内。
@@ -414,8 +443,21 @@ def main() -> int:
     # 校验通过后用规范化 path(去尾斜杠)喂给 source.list;local 模式不需要这一步。
     baidu_input = ""
     if args.source == "baidu":
+        # P1-N7 隐私门(issue #13):baidu 源开扫前必须验证 cfg[source][baidu][root]
+        # 本身合法(非空/非"/"/非缺失)—— 拒绝扫全盘。与 _validate_baidu_scope 互补:
+        # - require_scan_root: 验 root 本身是不是合法子路径
+        # - _validate_baidu_scope: 验 --input 是不是在 root 范围内
+        # 两者都先于 build_source(build_source 可能因 cred_path 缺失先 raise,
+        # 那就永远到不了隐私门 —— 隐私门是上游安全门,必须最先走)。
+        #
+        # P1 防御(PR #46 复审): 不直接拿 cfg 调 require_scan_root —— 如果
+        # cfg 是 local 默认配置(无 baidu 段)+ CLI --source baidu,require_scan_root
+        # 会看 cfg.source.type="local" 返 None,跳过 root 校验。必须先合并 CLI
+        # 跟 cfg,让 effective type=baidu 走 require_scan_root 的 baidu 分支。
+        effective_cfg = _effective_source_cfg(cfg, args.source)
+        require_scan_root(effective_cfg)
         baidu_input = _validate_baidu_scope(
-            args.input, cfg, opt_in=args.i_know_what_im_doing,
+            args.input, effective_cfg, opt_in=args.i_know_what_im_doing,
         )
 
     # 3) 工厂造 Source(本地/网盘)
@@ -437,6 +479,38 @@ def main() -> int:
         input_path = baidu_input
         junk = 0
     items = list(source.list(input_path))
+
+    # P1-N7 隐私门(issue #13): 过滤默认敏感 + 用户 exclude glob。
+    # 敏感项不进 02/03(不上传画面/语音给模型),不进 manifest。
+    # exclude 从 cfg["source"]["exclude"] 读(可选,默认空)。
+    # include 从 cfg["source"]["include"] 读(可选,默认空),满足 §13.2-3
+    # "用户可显式纳入" —— 被默认敏感清单误伤(如 /Downloads/family.mp4 被
+    # "Downloads" 关键词命中)的合法素材,用户可显式纳入。
+    # (P2 修复 PR #46 12:52 Opus 备用审: 之前 P2-2 只改函数没接管线,补上)
+    exclude_globs: list[str] = ((cfg.get("source") or {}).get("exclude") or []) \
+        if isinstance(cfg, dict) else []
+    if not isinstance(exclude_globs, list):
+        exclude_globs = []
+    include_globs: list[str] = ((cfg.get("source") or {}).get("include") or []) \
+        if isinstance(cfg, dict) else []
+    if not isinstance(include_globs, list):
+        include_globs = []
+    pre_exclude_count = len(items)
+    items = [it for it in items
+             if not is_excluded(getattr(it, "path", "") or "",
+                                exclude_globs, include=include_globs)]
+    excluded_count = pre_exclude_count - len(items)
+
+    # P1-N7 知情确认(issue #13 §4): 跑前告知用户本次处理的文件数 + 上传哪个模型。
+    # print scope 作为唯一路径提示(用户自己提供的子路径;不是具体文件名)。
+    # 不打印 individual file paths(避免日志/终端泄密)。model 名从 cfg 读,不硬编码。
+    vision_model = ((cfg.get("models") or {}).get("vision") or {}).get("model") \
+        if isinstance(cfg, dict) else None
+    model_label = vision_model or "<未配置 models.vision.model>"
+    print(f"将处理 {input_path} 下 {len(items)} 个文件,"
+          f"画面/语音会上传给 {model_label}")
+    if excluded_count:
+        print(f"  (隐私基线过滤 {excluded_count} 个敏感项, 不进 02/03)")
 
     # 4) stat 补 ffprobe/EXIF 元数据(SourceItem.raw["stat_meta"])
     enriched: list[Any] = []
@@ -486,6 +560,8 @@ def main() -> int:
         msg += f", Live Photo 动态分量 {live_skipped} 个(配对后不单独入库)"
     if junk:
         msg += f", 忽略系统垃圾文件 {junk} 个(._/隐藏文件)"
+    if excluded_count:
+        msg += f", 隐私基线排除 {excluded_count} 个敏感项(不进 02/03)"
     if content_kind:
         msg += f", 目录内容类型={content_kind}"
     msg += f", 数据源={args.source}"
