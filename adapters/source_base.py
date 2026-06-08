@@ -26,6 +26,56 @@ from typing import Any, Iterable, Optional
 # record.id 取内容指纹前 16 位(与 01_scan 的 sha1_file(path)[:16] 同宽)。
 _ID_WIDTH = 16
 
+# Live Photo 配对判定集(与 scripts/01_scan.py 的 _LIVE_MOTION_EXTS / _LIVE_STILL_EXTS 字节对齐)
+# 提到 source_base 作为 **Source 无关** 的共享常量:LocalSource + BaiduSource 共用,
+# 保证两源对 iPhone Live Photo 的配对判定一致(同目录同主名 + 唯一静态图 + 唯一 .mov)。
+_LIVE_MOTION_EXTS: frozenset[str] = frozenset({".mov"})
+_LIVE_STILL_EXTS: frozenset[str] = frozenset({".heic", ".heif", ".jpg", ".jpeg"})
+
+
+def pair_live_photos(items: list[SourceItem]) -> tuple[list[SourceItem], int]:
+    """Live Photo 配对 helper(Source 无关、本地与网盘共用)。
+
+    判定:同目录、同主名(不分大小写)下【恰好】1 张静态图(HEIC/JPEG)
+    + 1 个 .mov 才配对。歧义(多张静态 / 多个 .mov)不配,避免误伤真实视频。
+
+    行为(原地修改 items,严格保持 P2-1 字节对齐契约 — 见 test_live_photo_pairing.py):
+    - 静态照片: ``raw["live_motion_path"] = <motion 绝对路径>``
+    - 动态 .mov: ``raw.setdefault("status", "live_motion_skip")`` + ``raw["live_motion_pair"] = <photo 路径>``
+      (setdefault 而非赋值:不覆盖上游已写入的 status,留给上游决策)
+    - 未配对:保持原样
+
+    返回: ``(items, paired_count)``。``paired_count`` = 配对成功的对数(即抑制的 .mov 数)。
+
+    为什么放 source_base:LocalSource(Bug #36 字节对齐)与 BaiduSource(#12 派活要求)行为对称,
+    都通过此 helper 配对;01_scan.pair_live_photos(Path-tuple 版)不动(契约红线)。
+    """
+    groups: dict[tuple[str, str], dict[str, list[Path]]] = {}
+    for it in items:
+        p = Path(it.path)
+        stem = p.stem.lower()
+        key = (str(p.parent), stem)
+        bucket = groups.setdefault(key, {"photo": [], "motion": []})
+        suffix = p.suffix.lower()
+        if it.media_type == "photo" and suffix in _LIVE_STILL_EXTS:
+            bucket["photo"].append(p)
+        elif suffix in _LIVE_MOTION_EXTS:
+            bucket["motion"].append(p)
+    pairs: dict[Path, Path] = {}  # {motion: photo}
+    for bucket in groups.values():
+        if len(bucket["photo"]) == 1 and len(bucket["motion"]) == 1:
+            pairs[bucket["motion"][0]] = bucket["photo"][0]
+
+    photo_to_motion: dict[Path, Path] = {photo: motion for motion, photo in pairs.items()}
+    for it in items:
+        p = Path(it.path)
+        if p in pairs:                           # 动态 .mov 侧
+            it.raw.setdefault("status", "live_motion_skip")
+            it.raw["live_motion_pair"] = str(pairs[p])
+        elif p in photo_to_motion:               # 静态照片侧
+            it.raw["live_motion_path"] = str(photo_to_motion[p])
+    return items, len(pairs)
+
 
 def derive_record_id(*, sha1: Optional[str] = None, md5: Optional[str] = None) -> Optional[str]:
     """由内容指纹派生 record.id(16 hex)。
