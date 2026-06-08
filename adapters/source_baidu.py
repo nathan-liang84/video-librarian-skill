@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .source_base import Source, SourceItem
+from .source_base import Source, SourceItem, pair_live_photos
 
 DEFAULT_CRED_PATH = Path.home() / ".config" / "video-librarian" / "baidu_credentials.json"
 
@@ -202,6 +202,10 @@ class BaiduSource(Source):
             print(f"  (提示:忽略 {dropped_depth} 个深度 > {BAIDU_MAX_DEPTH} 的素材)"
                   f" → 收窄 --input 范围或调整 cfg[source][baidu][root] 重新跑")
         self._fill_md5(items)
+        # Live Photo 配对(#12 P1-N6):与 LocalSource 走同一共享 helper,
+        # 保证网盘侧 iPhone Live Photo 也能配对(静态图带 live_motion_path,
+        # 动态 .mov 打 status=live_motion_skip)。委托而非自写,避免双实现漂移。
+        items, _paired = pair_live_photos(items)
         return items
 
     def _listall(self, root: str) -> list[dict[str, Any]]:
