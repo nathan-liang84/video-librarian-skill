@@ -1,7 +1,6 @@
 """模型客户端抽象层 —— "看画面"(M3)与"处理文本"(M2.7)解耦,便于换模型。
 
 
-
 实现说明:
 - 默认走 OpenAI 兼容的 /chat/completions(base_url 在 config 配),MiniMax 提供兼容端点;
   若要用 MiniMax 原生协议,只需替换 _ChatClient.chat 的请求体,不影响上层。
@@ -104,19 +103,34 @@ DEFAULT_MAX_TOKENS = 4096
 
 class _ChatClient:
     def __init__(self, model: str, api_key: str, base_url: str,
-                 max_tokens: int | None = None):
+                 max_tokens: int | None = None,
+                 temperature: float = 0.0, top_p: float | None = None,
+                 seed: int | None = None):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.max_tokens = max_tokens if max_tokens else DEFAULT_MAX_TOKENS
+        # 采样参数:默认 temperature=0 走"确定化"(配合 seed 更稳);
+        # top_p/seed 仅在显式配置时下发,避免给不支持的服务塞 null。
+        self.temperature = temperature
+        self.top_p = top_p
+        self.seed = seed
 
-    def chat(self, messages: list[dict], *, temperature: float = 0.2,
+    def chat(self, messages: list[dict], *, temperature: float | None = None,
              max_retries: int = 2) -> str:
+        # 默认用实例的 temperature(走确定化);调用方显式传值则覆盖。
+        if temperature is None:
+            temperature = self.temperature
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}",
                    "Content-Type": "application/json"}
         payload = {"model": self.model, "messages": messages,
                    "temperature": temperature, "max_tokens": self.max_tokens}
+        # top_p/seed 仅在配置时下发,未配置不得出现(null 也会被部分服务拒)。
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
+        if self.seed is not None:
+            payload["seed"] = self.seed
         last_err: Exception | None = None
         for _ in range(max_retries + 1):
             try:
@@ -272,7 +286,10 @@ def _client_from(section: dict[str, Any]) -> _ChatClient:
             f"任何 OpenAI 兼容服务都可用:填 provider + base_url + model + api_key 即可。"
         )
     return _ChatClient(section["model"], section["api_key"], base_url,
-                       max_tokens=section.get("max_tokens"))
+                       max_tokens=section.get("max_tokens"),
+                       temperature=section.get("temperature", 0),
+                       top_p=section.get("top_p"),
+                       seed=section.get("seed"))
 
 
 def build_vision_model(cfg: dict[str, Any]) -> VisionModel:
