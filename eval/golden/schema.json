@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VideoLibrarian Golden Classification Sample",
+  "description": "金标集骨架条目 schema。每条对应一条人工标注基线,与 record.schema.json 字段不完全对齐:这里聚焦于 primary_category 与受控 facet。",
+  "type": "object",
+  "required": ["id", "media_type", "primary_category"],
+  "properties": {
+    "id": { "type": "string", "description": "全局唯一金标样本 ID,前缀 gs-" },
+    "media_type": { "type": "string", "enum": ["video", "photo"] },
+    "primary_category": {
+      "type": "string",
+      "enum": [
+        "人物", "活动事件", "美食", "风景空镜", "建筑空间",
+        "物品产品", "宠物动物", "交通旅途", "其他"
+      ]
+    },
+    "shot_type": { "type": ["string", "null"] },
+    "lighting": { "type": ["string", "null"] },
+    "subject_kind": { "type": ["string", "null"] },
+    "mood": { "type": "array", "items": { "type": "string" } },
+    "source_hint": { "type": "string", "description": "场景描述,不得含真实路径/人名" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": true
+}

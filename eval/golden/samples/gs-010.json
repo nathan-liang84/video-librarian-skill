@@ -1,0 +1,11 @@
+{
+  "id": "gs-010",
+  "media_type": "video",
+  "primary_category": "人物",
+  "shot_type": "近景",
+  "lighting": "室内光",
+  "subject_kind": "人物",
+  "mood": ["专注"],
+  "source_hint": "室内人物工作场景(合成占位)",
+  "notes": "骨架样本,占位内容。"
+}
