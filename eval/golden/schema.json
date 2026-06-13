@@ -1,25 +1,58 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "VideoLibrarian Golden Classification Sample",
-  "description": "金标集骨架条目 schema。每条对应一条人工标注基线,与 record.schema.json 字段不完全对齐:这里聚焦于 primary_category 与受控 facet。",
+  "title": "Eval Golden Sample Schema",
+  "description": "金标样本骨架,完整双人标注另立任务",
   "type": "object",
   "required": ["id", "media_type", "primary_category"],
   "properties": {
-    "id": { "type": "string", "description": "全局唯一金标样本 ID,前缀 gs-" },
-    "media_type": { "type": "string", "enum": ["video", "photo"] },
+    "id": {
+      "type": "string",
+      "description": "全局唯一样本 ID,如 gs-001"
+    },
+    "media_type": {
+      "type": "string",
+      "enum": ["video", "photo"]
+    },
     "primary_category": {
       "type": "string",
       "enum": [
-        "人物", "活动事件", "美食", "风景空镜", "建筑空间",
-        "物品产品", "宠物动物", "交通旅途", "其他"
-      ]
+        "人物",
+        "活动事件",
+        "美食",
+        "风景空镜",
+        "建筑空间",
+        "物品产品",
+        "宠物动物",
+        "交通旅途",
+        "其他"
+      ],
+      "description": "主类别(9 类闭集)"
     },
-    "shot_type": { "type": ["string", "null"] },
-    "lighting": { "type": ["string", "null"] },
-    "subject_kind": { "type": ["string", "null"] },
-    "mood": { "type": "array", "items": { "type": "string" } },
-    "source_hint": { "type": "string", "description": "场景描述,不得含真实路径/人名" },
-    "notes": { "type": "string" }
+    "shot_type": {
+      "type": ["string", "null"],
+      "description": "受控:vocab.shot_type"
+    },
+    "lighting": {
+      "type": ["string", "null"],
+      "description": "受控:vocab.lighting"
+    },
+    "subject_kind": {
+      "type": ["string", "null"],
+      "enum": ["人物", "物品", "建筑", "风景", "动物", "食物", "其他", null]
+    },
+    "mood": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "受控:vocab.mood"
+    },
+    "source_hint": {
+      "type": ["string", "null"],
+      "description": "占位描述,不写真实路径/网盘字样"
+    },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "标注备注"
+    }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

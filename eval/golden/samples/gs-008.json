@@ -2,10 +2,10 @@
   "id": "gs-008",
   "media_type": "video",
   "primary_category": "交通旅途",
-  "shot_type": "全景",
-  "lighting": "日光",
-  "subject_kind": "风景",
+  "shot_type": "中景",
+  "lighting": "自然光",
+  "subject_kind": "其他",
   "mood": ["期待"],
-  "source_hint": "高速公路行驶车流(合成占位)",
-  "notes": "骨架样本,占位内容。"
+  "source_hint": "车窗视角公路片段(合成占位)",
+  "notes": "合成占位样本。"
 }

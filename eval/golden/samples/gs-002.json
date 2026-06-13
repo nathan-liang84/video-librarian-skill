@@ -3,9 +3,9 @@
   "media_type": "video",
   "primary_category": "活动事件",
   "shot_type": "全景",
-  "lighting": "自然光",
+  "lighting": "混合光",
   "subject_kind": "人物",
-  "mood": ["欢乐", "热闹"],
-  "source_hint": "生日聚会现场(合成占位)",
-  "notes": "骨架样本,占位内容。"
+  "mood": ["热闹"],
+  "source_hint": "生日聚会桌面(合成占位)",
+  "notes": "合成占位样本。"
 }
