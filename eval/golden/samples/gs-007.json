@@ -1,0 +1,11 @@
+{
+  "id": "gs-007",
+  "media_type": "video",
+  "primary_category": "宠物动物",
+  "shot_type": "中景",
+  "lighting": "自然光",
+  "subject_kind": "动物",
+  "mood": ["活泼"],
+  "source_hint": "家中宠物互动(合成占位)",
+  "notes": "骨架样本,占位内容。"
+}
