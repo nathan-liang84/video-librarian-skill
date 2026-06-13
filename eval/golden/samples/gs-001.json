@@ -1,0 +1,11 @@
+{
+  "id": "gs-001",
+  "media_type": "photo",
+  "primary_category": "人物",
+  "shot_type": "中景",
+  "lighting": "自然光",
+  "subject_kind": "人物",
+  "mood": ["温馨"],
+  "source_hint": "海边人物合影(合成占位)",
+  "notes": "Scaffold sample. No real persons; uses placeholder role tokens."
+}

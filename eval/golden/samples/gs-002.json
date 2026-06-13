@@ -1,0 +1,11 @@
+{
+  "id": "gs-002",
+  "media_type": "video",
+  "primary_category": "活动事件",
+  "shot_type": "全景",
+  "lighting": "逆光",
+  "subject_kind": "人物",
+  "mood": ["欢快"],
+  "source_hint": "生日聚会片段(合成占位)",
+  "notes": "Scaffold sample."
+}

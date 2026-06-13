@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Golden Sample Schema",
+  "description": "Schema for golden classification samples used in M1-M4 consistency evaluation. Scaffolding only; full 150-200 double-annotated set is a separate task.",
+  "type": "object",
+  "required": ["id", "media_type", "primary_category"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Globally unique sample identifier (e.g. gs-001)."
+    },
+    "media_type": {
+      "type": "string",
+      "enum": ["video", "photo"],
+      "description": "Source media kind."
+    },
+    "primary_category": {
+      "type": "string",
+      "enum": [
+        "人物",
+        "活动事件",
+        "美食",
+        "风景空镜",
+        "建筑空间",
+        "物品产品",
+        "宠物动物",
+        "交通旅途",
+        "其他"
+      ],
+      "description": "Closed-set primary category from CLASSIFICATION_TAGGING_SPEC §4."
+    },
+    "shot_type": {
+      "type": ["string", "null"],
+      "description": "Controlled vocab.shot_type (optional)."
+    },
+    "lighting": {
+      "type": ["string", "null"],
+      "description": "Controlled vocab.lighting (optional)."
+    },
+    "subject_kind": {
+      "type": ["string", "null"],
+      "enum": ["人物", "物品", "建筑", "风景", "动物", "食物", "其他", null],
+      "description": "Controlled vocab.subject_kind (optional)."
+    },
+    "mood": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Controlled vocab.mood array (optional)."
+    },
+    "source_hint": {
+      "type": ["string", "null"],
+      "description": "Human-readable hint about the source scene; NEVER include real paths, drive letters, or netdisk keywords."
+    },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "Free-form annotation notes."
+    }
+  },
+  "additionalProperties": false
+}
