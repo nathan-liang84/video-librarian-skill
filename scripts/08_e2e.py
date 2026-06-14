@@ -7,7 +7,23 @@ import sys
 from pathlib import Path
 
 from adapters.source_base import SourceItem
-from scripts.scripts import resolve_picks
+
+
+def _resolve_picks(selection, manifest):
+    """对照 manifest 解析选择清单，返回 (resolved_entries, missing_names)。"""
+    name_to_entry = {}
+    for entry in manifest:
+        for key in ("new_name", "original_name"):
+            val = entry.get(key)
+            if val:
+                name_to_entry.setdefault(val, entry)
+    resolved, missing = [], []
+    for name in selection:
+        if name in name_to_entry:
+            resolved.append(name_to_entry[name])
+        else:
+            missing.append(name)
+    return resolved, missing
 
 
 def run_e2e(*, manifest, selection, root, delivery_name, source, dry_run=True, move=False, do_rename=True) -> dict:
@@ -21,7 +37,7 @@ def run_e2e(*, manifest, selection, root, delivery_name, source, dry_run=True, m
     if not delivery_name or not str(delivery_name).strip() or "/" in str(delivery_name):
         raise ValueError(f"非法交付夹名: {delivery_name!r}")
 
-    resolved, missing = resolve_picks(selection, manifest)
+    resolved, missing = _resolve_picks(selection, manifest)
 
     dest_dir = f"{str(root).rstrip('/')}/{delivery_name}"
 
@@ -48,6 +64,7 @@ def run_e2e(*, manifest, selection, root, delivery_name, source, dry_run=True, m
         entry = manifest_by_fs.get(item.get("fs_id"), item)
         report["summary"].append({
             "name": entry.get("new_name") or item.get("name"),
+            "original_name": entry.get("original_name") or item.get("original_name"),
             "remote_path": entry.get("remote_path") or item.get("remote_path"),
             "fs_id": entry.get("fs_id") or item.get("fs_id"),
             "md5": entry.get("md5") or item.get("md5"),
@@ -74,8 +91,8 @@ def run_e2e(*, manifest, selection, root, delivery_name, source, dry_run=True, m
             )
             source_items.append(item)
 
-            original_name = s["name"]
-            new_name = s["new_name"]
+            original_name = s.get("original_name") or s["name"]
+            new_name = s.get("new_name") or s["name"]
             if do_rename and new_name and new_name != original_name:
                 ok = source.rename(item, new_name)
                 if ok:
