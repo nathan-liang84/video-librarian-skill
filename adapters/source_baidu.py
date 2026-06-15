@@ -167,6 +167,15 @@ class BaiduSource(Source):
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode())
 
+    def _http_post_json(self, base: str, url_params: dict[str, Any],
+                        body: dict[str, Any], *, where: str) -> dict[str, Any]:
+        """POST with form-encoded body; url_params go in the query string."""
+        url = base + "?" + urllib.parse.urlencode(url_params)
+        encoded = urllib.parse.urlencode(body).encode()
+        req = urllib.request.Request(url, data=encoded, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read().decode())
+
     def _http_get_bytes(self, url: str) -> bytes:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -187,12 +196,23 @@ class BaiduSource(Source):
     # 110=access_token 失效(老 credential 无 token_expires_at 时被吊销 → 刷新一次重试)
     _TOKEN_ERRNOS = (111, -6, 110)
 
+    # 百度写接口需 POST form body;读接口用 GET。
+    _POST_METHODS = frozenset({"create", "filemanager", "precreate"})
+
     def _api(self, base: str, method: str, params: dict[str, Any], *, where: str,
              _retried: bool = False) -> dict[str, Any]:
-        p = {"method": method, "access_token": self.ensure_token(), **params}
-        data = self._http_get_json(base, p, where=where)
+        if method in self._POST_METHODS:
+            _URL_KEYS = frozenset({"opera", "async"})
+            url_p: dict[str, Any] = {"method": method, "access_token": self.ensure_token()}
+            body: dict[str, Any] = {}
+            for k, v in params.items():
+                (url_p if k in _URL_KEYS else body)[k] = v
+            data = self._http_post_json(base, url_p, body, where=where)
+        else:
+            p = {"method": method, "access_token": self.ensure_token(), **params}
+            data = self._http_get_json(base, p, where=where)
         errno = data.get("errno", 0)
-        # 反应式刷新:token 过期/失效(未知有效期或被提前吊销时)→ 刷新一次再重试
+        # 反应式刷新:token 过期/失效 → 刷新一次再重试
         if errno in self._TOKEN_ERRNOS and not _retried:
             self._do_refresh()
             return self._api(base, method, params, where=where, _retried=True)
@@ -463,9 +483,9 @@ class BaiduSource(Source):
 
     def _write_api_with_retry(self, base: str, method: str,
                               params: dict[str, Any], *, where: str) -> dict[str, Any]:
-        """写接口调 _api 包装:遇限频/临时不可用退避重试(不消耗 _TOKEN_ERRNOS 逻辑)。
+        """写接口 POST 包装:遇限频/临时不可用退避重试。
 
-        读接口(list/filemetas)走 _api 原逻辑(不重试);写操作遇限频合理退避。
+        百度写接口(create/filemanager)要求 POST form body,经 _api(_post=True) 发送。
         """
         last_err: Optional[Exception] = None
         for attempt in range(self._WRITE_RETRY_MAX):
@@ -474,10 +494,9 @@ class BaiduSource(Source):
             except BaiduError as e:
                 last_err = e
                 if e.errno not in self._WRITE_RETRY_ERRNOS:
-                    raise  # 非限频 → 跳出
+                    raise
                 if attempt + 1 < self._WRITE_RETRY_MAX:
                     time.sleep(self._WRITE_RETRY_BACKOFF * (attempt + 1))
-        # 最后一次仍限频 → 把最后一次的 BaiduError 抛给调用方
         assert last_err is not None
         raise last_err
 
@@ -490,7 +509,7 @@ class BaiduSource(Source):
         护栏: scope(path 必须在 self._root 内) + dry_run(默认不真发) + rename_log。
         """
         self._validate_scope(path)
-        payload = {"path": path, "isdir": 1, "size": 0, "block_list": "[]"}
+        payload = {"path": path, "isdir": 1, "size": 0, "block_list": "[]", "rtype": 1}
         if self._dry_run:
             self._log_write("mkdir", path=path, status="dry_run")
             return path  # 演练:返用户请求的 path(不真创建,让上层 07_collect 知道“此处本应建夹”)
