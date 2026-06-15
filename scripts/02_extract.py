@@ -16,11 +16,13 @@ import math
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.config import load_config  # noqa: E402
 from lib.manifest import Manifest  # noqa: E402
 from lib.imaging import register_heif  # noqa: E402  (集成 — 照片归一化)
+from lib.record import Record  # noqa: E402
 
 
 def _target_frame_cap(record, cfg: dict) -> int:
@@ -200,7 +202,118 @@ def _make_sprite(frames: list[Path], workdir: Path, record_id: str) -> str | Non
         return None
 
 
+def _record_to_source_item(record: Record) -> Any:
+    """把 manifest Record 映射为 SourceItem,供 BaiduSource.frames() 使用。
+
+    保留 BaiduSource 所需的 path / media_type / fs_id / content_md5 / size / raw。
+    """
+    from adapters.source_base import SourceItem  # 局部 import 避免冷启动拖慢本地管线
+
+    return SourceItem(
+        path=record.remote_path or record.path,
+        media_type=record.media_type,
+        size=int(record.filesize_mb or 0) * 1024 * 1024,  # SourceItem 期望字节
+        content_md5=record.remote_md5,
+        fs_id=record.fs_id,
+        remote_path=record.remote_path,
+        raw={},
+    )
+
+
+def _resolve_source(record: Record, cfg: dict) -> Optional[Any]:
+    """按记录的数据源标识构造 Source 适配器。
+
+    - 本地记录(effective_source == "local")→ 返回 None(走本地 ffmpeg 现有路径)
+    - 百度记录 → 返回 BaiduSource 实例
+    """
+    src_name = record.effective_source
+    if src_name == "local":
+        return None
+
+    if src_name == "baidu":
+        from adapters.source_baidu import BaiduSource  # noqa: WPS433
+        baidu_cfg = (cfg.get("source", {}) or {}).get("baidu", {}) or {}
+        cred_path = baidu_cfg.get("cred_path")
+        if not cred_path:
+            raise ValueError(
+                "百度源记录需要 cfg['source']['baidu']['cred_path'] 配置"
+            )
+        return BaiduSource(cred_path=cred_path)
+
+    raise ValueError(f"未知数据源: {src_name!r}(仅支持 'local' / 'baidu')")
+
+
+def _extract_baidu_record(record: Record, workdir: Path, cfg: dict) -> None:
+    """百度网盘记录的帧提取:走 BaiduSource.frames()。
+
+    - 视频走 HLS/M3U8 流式抽帧(不下整片)
+    - 照片走 dlink 直下临时文件
+    - 返回 0 帧 → 标记 failed
+    - 返回 1 帧兜底缩略图 → 仍标 extracted(03 决定是否有用)
+    - 百度记录跳过 ASR(record.path 是远程路径,不能本地 ffmpeg 抽音轨)
+    """
+    source = _resolve_source(record, cfg)
+    if source is None:
+        raise RuntimeError("_extract_baidu_record 在非百度记录上被调用")
+
+    item = _record_to_source_item(record)
+    frames_dir = workdir / record.id / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    target_cap = _target_frame_cap(record, cfg)
+    frames = source.frames(item, frames_dir, cap=target_cap)
+
+    if not frames:
+        raise RuntimeError(
+            "Baidu 流式/dlink 帧提取失败(未返回任何帧)。"
+            "可能是 HLS 转码未就绪(31341)或 dlink 失效。"
+        )
+
+    # 百度照片:frames 返回下载到本地的原图路径
+    if record.media_type == "photo":
+        # 用返回的本地帧做归一化与缩略图
+        local_photo = frames[0]
+        thumbnail = _make_thumbnail_from_image(
+            local_photo, workdir / record.id / "thumbnail.jpg",
+            int(cfg.get("extract", {}).get("thumbnail_width", 320)),
+        )
+        record.thumbnail = thumbnail or record.thumbnail
+        record.sprite = None
+        record.transcript = None
+        record.has_speech = False
+        record.status = "extracted"
+        return
+
+    # 百度视频:frames 返回 HLS 抽出的关键帧(或 1 张兜底缩略图)
+    record.thumbnail = (
+        _make_thumbnail_from_image(
+            frames[0], workdir / record.id / "thumbnail.jpg",
+            int(cfg.get("extract", {}).get("thumbnail_width", 320)),
+        )
+        or record.thumbnail
+    )
+
+    if len(frames) >= 2 and cfg.get("extract", {}).get("make_sprite", True):
+        record.sprite = _make_sprite(frames, workdir, record.id)
+    else:
+        record.sprite = None
+        if len(frames) < 2:
+            print(f"  (提示: 百度记录 {record.original_name} 仅返回 {len(frames)} 帧"
+                  "(兜底缩略图);03_understand 将基于有限画面理解。)")
+
+    # 百度记录跳过 ASR(record.path 是远程路径)
+    record.transcript = None
+    record.has_speech = False
+    record.status = "extracted"
+
+
 def _extract_record(record, workdir: Path, cfg: dict) -> None:
+    # 百度网盘记录:走 source adapter 的 frames() 契约
+    if record.effective_source == "baidu":
+        _extract_baidu_record(record, workdir, cfg)
+        return
+
+    # 本地记录:保持现有行为
     if record.media_type == "photo":
         # P1a-B-2:产出归一化帧(摆正 + HEIC→jpg),供 03 优先读取;
         # 失败时归一化帧不写记录,03 自然退回原图路径,不崩。
