@@ -282,8 +282,8 @@ def _run_smoke(source, root, delivery_name):
     temp_name = "__e2e_smoke_renamed__" + sample_name
 
     try:
-        # 2. 建交付夹
-        source.mkdir(dest_dir)
+        # 2. 建交付夹(mkdir 返回实际路径;rtype=1 时若有冲突百度会自动改名)
+        dest_dir = source.mkdir(dest_dir)
 
         # 3. collect(copy)真实文件进交付夹 —— 失败/零条即 fail
         n = source.collect([sample], dest_dir, move=False)
