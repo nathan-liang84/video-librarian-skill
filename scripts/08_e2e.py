@@ -29,6 +29,16 @@ import argparse
 import json
 import os
 import posixpath
+import sys
+from pathlib import Path
+
+# CLI 自举:直接 `python scripts/08_e2e.py` 时 sys.path[0] 是 scripts/,仓库根不在
+# path 上,顶层 `from adapters import ...` 会 ModuleNotFoundError(测试用 importlib
+# 单独加载时是人为把仓库根加进了 path)。这里把仓库根插进 sys.path,使【测试】与
+# 【真实 CLI 调用】两种上下文都能导入 adapters。必须在 import adapters 之前执行。
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from adapters.source_base import SourceItem
 
@@ -243,59 +253,62 @@ def build_source(args):
 
 
 def _run_smoke(source, root, delivery_name):
-    """真机 sandbox 往返(仅 VL_BAIDU_LIVE 置位时被调)。
+    """真机 sandbox 往返(仅 VL_BAIDU_LIVE 置位时被调)——诚实实证,不空转返 0。
 
-    只用 source 已有写方法(mkdir / collect / rename),不依赖 source.list():
-      1. 在 --root sandbox 下 mkdir 一个测试交付夹
-      2. 用合成 SourceItem(valid 绝对路径 under root + nonempty fs_id)collect(copy)
-      3. rename 改名
-      4. rollback_renames 回滚
-      5. 打印脱敏结果(不打印个人路径)
-    成功 return 0,失败 return 1。
+    用 source.list(root) 取一个真实文件,逐步真做并检查成败,任一真实操作失败即 return 1;
+    只有 mkdir + collect(copy) + rename + rollback 全部成功才 return 0。改名往返作用在真实
+    item 上,并通过 rollback 还原(sandbox 最终不变);若 rollback 失败会明确告警。
     """
     if (not root or not isinstance(root, str)
             or root.strip() == "" or root.strip() == "/"):
         print(f"[smoke] FAIL: 非法 root {root!r}")
         return 1
 
-    sandbox_dir = f"{root.rstrip('/')}/__e2e_smoke__"
-    sample_name = "smoke_sample.mp4"
-    renamed_name = "smoke_renamed.mp4"
-    sample_path = f"{sandbox_dir}/{sample_name}"
-    renamed_path = f"{sandbox_dir}/{renamed_name}"
+    # 1. 取一个真实文件(真机 sandbox 需先放好测试素材)
+    try:
+        items = list(source.list(root))
+    except Exception as exc:
+        print(f"[smoke] FAIL: list({root!r}) 抛错: {exc!r}")
+        return 1
+    sample = next((it for it in items
+                   if getattr(it, "fs_id", None) and getattr(it, "path", None)), None)
+    if sample is None:
+        print("[smoke] FAIL: sandbox 下没有可用文件,先放一个测试素材再跑")
+        return 1
+
+    sample_path = sample.path
+    sample_name = posixpath.basename(sample_path)
+    dest_dir = f"{root.rstrip('/')}/{delivery_name}"
+    temp_name = "__e2e_smoke_renamed__" + sample_name
 
     try:
-        # 1. 建测试交付夹(写入 root 内的 sandbox 子路径)
-        source.mkdir(sandbox_dir)
+        # 2. 建交付夹
+        source.mkdir(dest_dir)
 
-        # 2. 合成 SourceItem(valid 绝对路径 under root + nonempty fs_id),走写路径
-        synth = SourceItem(
-            path=sample_path,
-            media_type="video",
-            fs_id="smoke_test_1",
-            remote_path=sample_path,
-        )
+        # 3. collect(copy)真实文件进交付夹 —— 失败/零条即 fail
+        n = source.collect([sample], dest_dir, move=False)
+        if not n:
+            print("[smoke] FAIL: collect 未复制任何文件")
+            return 1
 
-        # 3. collect(copy)一个"选中" — best-effort:真机若文件不存在可能失败,
-        #    但不阻断后续 rename 往返验证(主要验写路径契约)
-        try:
-            source.collect([synth], sandbox_dir, move=False)
-        except Exception:
-            pass
+        # 4. rename 真实文件往返:改临时名 —— 必须返 True
+        if not source.rename(sample, temp_name):
+            print("[smoke] FAIL: rename 返回 False(改名未生效)")
+            return 1
 
-        # 4. rename 改名往返
-        source.rename(synth, renamed_name)
-
-        # 5. rollback_renames 回滚(验日志路径可用)
-        rollback_log = [{
-            "fs_id": "smoke_test_1",
+        # 5. rollback:用改名后路径改回原名 —— 必须成功 1 条
+        new_remote_path = f"{posixpath.dirname(sample_path)}/{temp_name}"
+        back = rollback_renames([{
+            "fs_id": sample.fs_id,
             "old_name": sample_name,
-            "new_name": renamed_name,
-            "new_remote_path": renamed_path,
-        }]
-        rollback_renames(rollback_log, source)
+            "new_name": temp_name,
+            "new_remote_path": new_remote_path,
+        }], source)
+        if back != 1:
+            print("[smoke] FAIL: rollback 未还原改名(真机文件可能停在临时名,请手动检查!)")
+            return 1
 
-        print("[smoke] OK: sandbox round-trip under root (路径脱敏)")
+        print("[smoke] OK: list->mkdir->collect->rename->rollback 真机往返全部成功(路径脱敏)")
         return 0
     except Exception as exc:
         print(f"[smoke] FAIL: round-trip 抛错: {exc!r}")

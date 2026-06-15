@@ -81,6 +81,12 @@ class FakeSource:
         self.collect_calls: list[tuple] = []
         self.rename_calls: list[tuple] = []
 
+    def list(self, root):
+        # 替身 source.list:返回一个 valid 合成 item(root 内绝对路径 + fs_id),
+        # 供 --smoke 真机往返在测试里走通(确定性验证 smoke 不是 print 桩)。
+        return [SourceItem(path=f"{str(root).rstrip('/')}/smoke_sample.mp4",
+                           media_type="video", fs_id="smoke_fs_1")]
+
     def mkdir(self, path: str) -> str:
         _fake_scope(path, "mkdir")
         self.mkdir_calls.append(path)
