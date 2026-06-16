@@ -257,6 +257,9 @@ def _extract_baidu_record(record: Record, workdir: Path, cfg: dict) -> None:
         raise RuntimeError("_extract_baidu_record 在非百度记录上被调用")
 
     item = _record_to_source_item(record)
+    # 确保百度记录有 filemetas(thumbs/dlink),否则 HLS 失败时 _thumb_fallback() 拿不到封面
+    if source.stat is not None:
+        source.stat(item)
     frames_dir = workdir / record.id / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
@@ -271,10 +274,20 @@ def _extract_baidu_record(record: Record, workdir: Path, cfg: dict) -> None:
 
     # 百度照片:frames 返回下载到本地的原图路径
     if record.media_type == "photo":
-        # 用返回的本地帧做归一化与缩略图
         local_photo = frames[0]
+        # 归一化到 tmp/<id>/frames/photo.jpg — 03_understand._frames_for() 读这个路径
+        photo_dst = frames_dir / "photo.jpg"
+        try:
+            from PIL import Image  # noqa: WPS433
+            with Image.open(local_photo) as img:
+                img.convert("RGB").save(photo_dst, format="JPEG")
+        except Exception:  # noqa: BLE001
+            # PIL 不可用或源文件异常 → 直接复制文件
+            import shutil  # noqa: WPS433
+            shutil.copy2(local_photo, photo_dst)
+        # 用归一化后的帧做缩略图
         thumbnail = _make_thumbnail_from_image(
-            local_photo, workdir / record.id / "thumbnail.jpg",
+            photo_dst, workdir / record.id / "thumbnail.jpg",
             int(cfg.get("extract", {}).get("thumbnail_width", 320)),
         )
         record.thumbnail = thumbnail or record.thumbnail

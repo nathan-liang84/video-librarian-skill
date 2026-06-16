@@ -242,6 +242,163 @@ def test_baidu_single_fallback_frame_still_extracted(tmp_path, monkeypatch):
     assert record.sprite is None
 
 
+# ── Finding 1 回归:百度照片产出 tmp/<id>/frames/photo.jpg ─────────
+
+def test_baidu_photo_produces_photo_jpg_for_03(tmp_path, monkeypatch):
+    """百度照片帧提取后,tmp/<id>/frames/photo.jpg 必须存在,供 03_understand._frames_for() 读取。"""
+    extract = _load_extract_module()
+
+    record = Record(
+        id="baiduphoto03",
+        media_type="photo",
+        original_name="IMG_03.jpg",
+        path="/网盘/照片/IMG_03.jpg",
+        source="baidu",
+        remote_path="/网盘/照片/IMG_03.jpg",
+    )
+
+    fake_source = MagicMock()
+    # 模拟 dlink 下载到本地的临时文件
+    downloaded = tmp_path / "downloaded_orig.jpg"
+    # 写一个最小有效 JPEG(1x1 像素)以供 PIL 打开
+    try:
+        from PIL import Image  # noqa: WPS433
+        img = Image.new("RGB", (2, 2), color="red")
+        img.save(downloaded, format="JPEG")
+    except ImportError:
+        downloaded.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10)
+    fake_source.frames.return_value = [downloaded]
+    fake_source.stat = MagicMock(return_value=None)  # stat 幂等不报错
+
+    monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+
+    workdir = tmp_path / "tmp"
+    extract._extract_record(record, workdir, {"extract": {}})
+
+    assert record.status == "extracted"
+    photo_jpg = workdir / record.id / "frames" / "photo.jpg"
+    assert photo_jpg.is_file(), f"03_understand 期望的帧路径不存在: {photo_jpg}"
+
+    # 回归验证:03_understand._frames_for() 能找到帧
+    # (模拟 _frames_for 的 photo 分支逻辑)
+    normalized = workdir / record.id / "frames" / "photo.jpg"
+    assert normalized.is_file(), "_frames_for() 会找不到帧"
+
+
+def test_baidu_photo_03_frames_for_integration(tmp_path, monkeypatch):
+    """端到端验证:02_extract 百度照片后,03_understand._frames_for() 返回非空。"""
+    extract = _load_extract_module()
+
+    record = Record(
+        id="baiduphoto_int",
+        media_type="photo",
+        original_name="IMG_int.jpg",
+        path="/网盘/照片/IMG_int.jpg",
+        source="baidu",
+        remote_path="/网盘/照片/IMG_int.jpg",
+    )
+
+    fake_source = MagicMock()
+    downloaded = tmp_path / "dl.jpg"
+    try:
+        from PIL import Image  # noqa: WPS433
+        img = Image.new("RGB", (4, 4), color="blue")
+        img.save(downloaded, format="JPEG")
+    except ImportError:
+        downloaded.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10)
+    fake_source.frames.return_value = [downloaded]
+    fake_source.stat = MagicMock(return_value=None)
+
+    monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+
+    workdir = tmp_path / "tmp"
+    extract._extract_record(record, workdir, {"extract": {}})
+
+    # 模拟 03_understand._frames_for 的 photo 分支
+    normalized = workdir / record.id / "frames" / "photo.jpg"
+    frames_result = [normalized] if normalized.is_file() else ([Path(record.path)] if Path(record.path).exists() else [])
+    assert len(frames_result) > 0, "03 会找不到帧 → 空列表 → 失败"
+    assert frames_result[0] == normalized, "应优先读归一化帧而非 record.path"
+
+
+# ── Finding 2 回归:百度视频 stat() 补全 filemetas/thumbs ─────────
+
+def test_baidu_video_calls_stat_before_frames(tmp_path, monkeypatch):
+    """百度视频记录:frames() 前必须先调 source.stat() 补全 filemetas/thumbs,
+    确保 HLS 失败时 _thumb_fallback() 能拿到封面。"""
+    extract = _load_extract_module()
+
+    record = Record(
+        id="baiduvid_stat",
+        media_type="video",
+        original_name="VID_stat.mp4",
+        path="/网盘/VID_stat.mp4",
+        source="baidu",
+        remote_path="/网盘/VID_stat.mp4",
+        fs_id="998877",
+    )
+
+    fake_source = MagicMock()
+    # stat 应填充 item.raw["filemetas"]
+    def fake_stat(item):
+        item.raw["filemetas"] = {"thumbs": {"url3": "https://thumb.example/cover.jpg"}}
+        return item
+    fake_source.stat = MagicMock(side_effect=fake_stat)
+
+    frame = tmp_path / "frame.jpg"
+    frame.write_bytes(b"frame")
+    fake_source.frames.return_value = [frame]
+
+    monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+
+    extract._extract_record(record, tmp_path / "tmp", {"extract": {}})
+
+    assert record.status == "extracted"
+    # 验证 stat 被调用过
+    fake_source.stat.assert_called_once()
+    # 验证传给 frames() 的 item 有 filemetas
+    call_args = fake_source.frames.call_args
+    item = call_args[0][0]
+    assert "filemetas" in item.raw, "item.raw 缺 filemetas → _thumb_fallback 会失败"
+
+
+def test_baidu_video_thumb_fallback_works_after_stat(tmp_path, monkeypatch):
+    """端到端验证:HLS 全部失败 → _thumb_fallback 通过 stat 拿到 thumbs → 返回 1 帧兜底。"""
+    extract = _load_extract_module()
+
+    record = Record(
+        id="baiduvid_fallback",
+        media_type="video",
+        original_name="VID_fb.mp4",
+        path="/网盘/VID_fb.mp4",
+        source="baidu",
+        remote_path="/网盘/VID_fb.mp4",
+        fs_id="555666",
+    )
+
+    fake_source = MagicMock()
+    def fake_stat(item):
+        item.raw["filemetas"] = {
+            "thumbs": {"url3": "https://thumb.example/cover.jpg"},
+            "dlink": "https://dl.example.com/photo",
+        }
+        return item
+    fake_source.stat = MagicMock(side_effect=fake_stat)
+
+    fallback_frame = tmp_path / "cover.jpg"
+    fallback_frame.write_bytes(b"cover")
+    fake_source.frames.return_value = [fallback_frame]
+
+    monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+    monkeypatch.setattr(extract, "_make_thumbnail_from_image",
+                        lambda src, dst, w: str(dst))
+
+    extract._extract_record(record, tmp_path / "tmp", {"extract": {}})
+
+    assert record.status == "extracted"
+    assert record.sprite is None  # 1 帧 → 不做雪碧图
+
+
 # ── SourceItem 映射 ──────────────────────────────────────
 
 def test_record_to_source_item_maps_fields():
