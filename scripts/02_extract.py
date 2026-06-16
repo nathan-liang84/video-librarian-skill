@@ -275,16 +275,19 @@ def _extract_baidu_record(record: Record, workdir: Path, cfg: dict) -> None:
     # 百度照片:frames 返回下载到本地的原图路径
     if record.media_type == "photo":
         local_photo = frames[0]
-        # 归一化到 tmp/<id>/frames/photo.jpg — 03_understand._frames_for() 读这个路径
+        # 复用本地照片归一化管线(HEIC 解码 + EXIF 摆正 + RGB JPEG)，
+        # 产出 tmp/<id>/frames/photo.jpg — 03_understand._frames_for() 读这个路径。
+        # _normalize_photo_frame 接受 record 并用 record.path 做输入，
+        # 但百度的 record.path 是远程路径，所以先把 source.frames() 下载到
+        # 本地的文件路径临时塞给归一化函数。
         photo_dst = frames_dir / "photo.jpg"
-        try:
-            from PIL import Image  # noqa: WPS433
-            with Image.open(local_photo) as img:
-                img.convert("RGB").save(photo_dst, format="JPEG")
-        except Exception:  # noqa: BLE001
-            # PIL 不可用或源文件异常 → 直接复制文件
-            import shutil  # noqa: WPS433
-            shutil.copy2(local_photo, photo_dst)
+        register_heif()
+        from lib.imaging import normalize_photo  # noqa: WPS433
+        normalized_ok = normalize_photo(Path(str(local_photo)), photo_dst)
+        if not normalized_ok:
+            raise RuntimeError(
+                "Baidu 照片归一化失败(HEIC/EXIF)，无法产出可用帧"
+            )
         # 用归一化后的帧做缩略图
         thumbnail = _make_thumbnail_from_image(
             photo_dst, workdir / record.id / "thumbnail.jpg",

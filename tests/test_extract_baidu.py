@@ -120,7 +120,12 @@ def test_baidu_photo_uses_source_frames(tmp_path, monkeypatch):
 
     fake_source = MagicMock()
     photo_local = tmp_path / "downloaded.jpg"
-    photo_local.write_bytes(b"fake photo")
+    # 写最小有效 JPEG 以供 normalize_photo() 处理
+    try:
+        from PIL import Image  # noqa: WPS433
+        Image.new("RGB", (2, 2), color="red").save(photo_local, format="JPEG")
+    except ImportError:
+        photo_local.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10)
     fake_source.frames.return_value = [photo_local]
 
     monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
@@ -271,6 +276,7 @@ def test_baidu_photo_produces_photo_jpg_for_03(tmp_path, monkeypatch):
     fake_source.stat = MagicMock(return_value=None)  # stat 幂等不报错
 
     monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+    # 让 normalize_photo 使用真实 PIL 处理(不用 monkeypatch 拦截)
 
     workdir = tmp_path / "tmp"
     extract._extract_record(record, workdir, {"extract": {}})
@@ -279,10 +285,10 @@ def test_baidu_photo_produces_photo_jpg_for_03(tmp_path, monkeypatch):
     photo_jpg = workdir / record.id / "frames" / "photo.jpg"
     assert photo_jpg.is_file(), f"03_understand 期望的帧路径不存在: {photo_jpg}"
 
-    # 回归验证:03_understand._frames_for() 能找到帧
-    # (模拟 _frames_for 的 photo 分支逻辑)
-    normalized = workdir / record.id / "frames" / "photo.jpg"
-    assert normalized.is_file(), "_frames_for() 会找不到帧"
+    # 验证产出的是真实 JPEG(不是 HEIC 套 .jpg 扩展名)
+    with open(photo_jpg, "rb") as f:
+        header = f.read(3)
+    assert header[:2] == b"\xff\xd8", f"photo.jpg 不是有效 JPEG: {header!r}"
 
 
 def test_baidu_photo_03_frames_for_integration(tmp_path, monkeypatch):
@@ -319,6 +325,90 @@ def test_baidu_photo_03_frames_for_integration(tmp_path, monkeypatch):
     frames_result = [normalized] if normalized.is_file() else ([Path(record.path)] if Path(record.path).exists() else [])
     assert len(frames_result) > 0, "03 会找不到帧 → 空列表 → 失败"
     assert frames_result[0] == normalized, "应优先读归一化帧而非 record.path"
+
+
+# ── Finding 3 回归:百度照片走 normalize_photo(HEIC + EXIF) ──────
+
+def test_baidu_photo_uses_normalize_photo_not_raw_pil(tmp_path, monkeypatch):
+    """百度照片分支必须走 normalize_photo()，不能自己 PIL.open + convert。"""
+    extract = _load_extract_module()
+
+    record = Record(
+        id="baiduphoto_norm",
+        media_type="photo",
+        original_name="IMG_heic.heic",
+        path="/网盘/照片/IMG_heic.heic",
+        source="baidu",
+        remote_path="/网盘/照片/IMG_heic.heic",
+    )
+
+    fake_source = MagicMock()
+    downloaded = tmp_path / "downloaded.heic"
+    downloaded.write_bytes(b"fake heic bytes")
+    fake_source.frames.return_value = [downloaded]
+    fake_source.stat = MagicMock(return_value=None)
+
+    monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+
+    # 拦截 normalize_photo 验证它被调用
+    import lib.imaging as imaging_mod
+    call_log = []
+    real_normalize = imaging_mod.normalize_photo
+
+    def tracking_normalize(src, dst):
+        call_log.append((str(src), str(dst)))
+        # 调真实函数，用 fake JPEG 让它成功
+        fake_jpg = tmp_path / "fake_for_norm.jpg"
+        try:
+            from PIL import Image  # noqa: WPS433
+            Image.new("RGB", (2, 2), color="green").save(fake_jpg, format="JPEG")
+        except ImportError:
+            fake_jpg.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10)
+        return real_normalize(fake_jpg, dst)
+
+    monkeypatch.setattr(imaging_mod, "normalize_photo", tracking_normalize)
+    # 也拦截 02_extract 模块里导入的 normalize_photo
+    # 02_extract 里是局部 import，所以 monkeypatch imaging_mod.normalize_photo 就够了
+
+    extract._extract_record(record, tmp_path / "tmp", {"extract": {}})
+
+    assert record.status == "extracted"
+    assert len(call_log) == 1, f"normalize_photo 应被调用 1 次，实际 {len(call_log)}"
+    src_path, dst_path = call_log[0]
+    assert "downloaded.heic" in src_path or "downloaded" in src_path, \
+        f"normalize_photo 的 src 应是百度下载的本地文件，实际 {src_path}"
+    assert "photo.jpg" in dst_path, f"normalize_photo 的 dst 应是 photo.jpg，实际 {dst_path}"
+
+
+def test_baidu_photo_normalize_failure_raises(tmp_path, monkeypatch):
+    """百度照片归一化失败(normalize_photo 返回 False)→ failed，不留 HEIC 套 .jpg。"""
+    extract = _load_extract_module()
+
+    record = Record(
+        id="baiduphoto_fail",
+        media_type="photo",
+        original_name="broken.heic",
+        path="/网盘/照片/broken.heic",
+        source="baidu",
+        remote_path="/网盘/照片/broken.heic",
+    )
+
+    fake_source = MagicMock()
+    downloaded = tmp_path / "broken_download"
+    downloaded.write_bytes(b"corrupt")
+    fake_source.frames.return_value = [downloaded]
+    fake_source.stat = MagicMock(return_value=None)
+
+    monkeypatch.setattr(extract, "_resolve_source", lambda r, c: fake_source)
+
+    import lib.imaging as imaging_mod
+    monkeypatch.setattr(imaging_mod, "normalize_photo", lambda src, dst: False)
+
+    try:
+        extract._extract_record(record, tmp_path / "tmp", {"extract": {}})
+        assert False, "应抛 RuntimeError"
+    except RuntimeError as e:
+        assert "归一化" in str(e) or "normalize" in str(e).lower() or "HEIC" in str(e)
 
 
 # ── Finding 2 回归:百度视频 stat() 补全 filemetas/thumbs ─────────
