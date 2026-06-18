@@ -403,6 +403,10 @@ class BaiduSource(Source):
                       retries: int = 3, backoff: float = 2.0) -> list[Path]:
         # 自动切换智能退避: 仅当调用方未覆盖默认值(retries==3 and backoff==2.0)时,
         # 按 item.size 换档。显式传参 → 走原逻辑(向后兼容,如旧测试/上层固定档)。
+        #
+        # 注意:这里的 retries/backoff 只决定 _streaming_m3u8 在命中 errno==31341 时的
+        # 转码等待预算。非 31341(永久错误/空响应/坏 JSON/adToken 失败)会立即兜底,
+        # 不读这两个值——故大视频遇永久错误不会因长退避而挂住(Codex Review PR #69)。
         if retries == 3 and backoff == 2.0:
             retries, backoff = self._transcode_wait_plan(item.size or 0)
         m3u8 = self._streaming_m3u8(item, retries=retries, backoff=backoff)
@@ -436,24 +440,34 @@ class BaiduSource(Source):
         真机实测:成功时百度**直接返回 `#EXTM3U` 文本**(Content-Type application/x-mpegURL),
         **不是 JSON**;失败/未就绪时返回 JSON 错误体(如 errno=31341)。少数情况首个响应是带
         `adToken` 的 JSON,需要带 adToken 二次请求才拿到 M3U8。故:取**原文** → 嗅探首行。
+
+        退避策略(Codex Review 反馈 PR #69):
+        - size-based 长等待**严格 gating 在 errno==31341**。非 31341 的 JSON(路径/权限/token
+          错、其它 errno)、空响应、坏 JSON → 立即 ``return None``,不吃大视频等待窗口。
+        - ``adToken`` 分支**先立即二次请求**;二次请求仍明确返 31341 才进转码等待,普通
+          adToken 失败不当转码未就绪。
+        - **deadline 状态机**而非固定次数循环:sleep 只发生在两次请求之间,sleep 前先检查
+          deadline,保证不会"睡完不再 poll"或末次无意义 sleep。
+        - ``retries``/``backoff`` 仅决定 31341 的退避预算(由 _video_frames 按 size 换档),
+          非 31341 路径不读它们 → 大视频遇永久错误会快速兜底,不会让 02_extract 看起来挂住。
         """
-        for attempt in range(retries):
+        # 31341 转码等待预算(单调时钟 deadline)。budget = 若干次 _transcode_sleep 之和。
+        budget = sum(self._transcode_sleep(backoff, a, item.size or 0)
+                     for a in range(max(retries, 1)))
+        deadline = time.monotonic() + budget
+        attempt = 0
+        while True:
+            # ---- 主请求 ----
             try:
                 text = self._http_get_text(self._streaming_url(item, vtype=vtype))
             except Exception:
                 text = ""
             if text.lstrip().startswith("#EXTM3U"):
                 return text
-            # 非 M3U8 → 多半是 JSON 错误体(只在该分支吞解析错,其它异常不掩盖)
-            try:
-                data = json.loads(text) if text.strip() else {}
-            except (json.JSONDecodeError, ValueError):
-                data = {}
-            if data.get("errno") == _TRANSCODE_NOT_READY:
-                wait = self._transcode_sleep(backoff, attempt, item.size or 0)
-                time.sleep(wait)
-                continue
-            ad = data.get("adToken")
+            data = self._parse_json_or_none(text)
+
+            # ---- adToken: 立即二次请求,不睡 ----
+            ad = (data or {}).get("adToken")
             if ad:
                 try:
                     text2 = self._http_get_text(
@@ -462,9 +476,35 @@ class BaiduSource(Source):
                     text2 = ""
                 if text2.lstrip().startswith("#EXTM3U"):
                     return text2
+                data = self._parse_json_or_none(text2) or data  # 用更明确的二次响应
+
+            # ---- 严格 gating: 只有 31341 才进转码等待 ----
+            # 非 31341(含 data is None: 空/坏 JSON; 或其它 errno)→ 立即失败,不 sleep。
+            if not data or data.get("errno") != _TRANSCODE_NOT_READY:
+                return None
+
+            # ---- 31341 转码未就绪:sleep 前检查 deadline ----
+            if attempt >= retries:
+                return None
             wait = self._transcode_sleep(backoff, attempt, item.size or 0)
+            if time.monotonic() + wait > deadline:
+                return None  # 超预算 → 不再睡(避免睡完不再 poll 的无意义等待)
             time.sleep(wait)
-        return None
+            attempt += 1
+
+    @staticmethod
+    def _parse_json_or_none(text: str) -> Optional[dict[str, Any]]:
+        """把 streaming 响应原文解析成 JSON dict;空/坏 JSON 返回 None。
+
+        抽出来便于在 deadline 状态机里复用(主请求 + adToken 二次请求都要解析)。
+        解析错不掩盖其它异常——只吞 JSON 相关的。
+        """
+        if not text or not text.strip():
+            return None
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return None
 
     def _thumb_fallback(self, item: SourceItem, dest_dir: Path) -> list[Path]:
         """转码未就绪/抽帧失败 → 用封面 thumbs 作单帧兜底(quick 档可接受)。"""

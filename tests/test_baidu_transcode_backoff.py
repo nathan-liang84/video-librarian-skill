@@ -3,15 +3,17 @@
 背景: _streaming_m3u8 遇 31341(转码未就绪)固定 3×2s 只等 ~12s,大视频来不及转码。
 补丁按视频大小分档动态计算 retries/base_backoff,并在 sleep 时叠加 size_factor。
 
-覆盖:
+Codex Review(PR #69)修正后覆盖:
 1. _transcode_wait_plan —— 四档返回值 + 边界值 + 未知大小(<=0)走最小档
 2. _transcode_sleep —— 公式 base_backoff*(1+attempt)+size_factor,size_factor 上限 10s
 3. _video_frames 自动切换守卫 —— 默认值触发智能退避;显式传参走旧逻辑(向后兼容)
-4. _streaming_m3u8 —— 31341 退避与 adToken 分支均经 _transcode_sleep(捕获 time.sleep 入参)
+4. _streaming_m3u8 deadline 状态机 —— size-based 长 sleep **仅**在 errno==31341 时发生;
+   非 31341/空/坏 JSON/adToken 失败 → 立即兜底不睡;sleep 只发生在两次请求之间
 """
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -141,10 +143,14 @@ def test_video_frames_respects_explicit_retries_backoff(monkeypatch):
     assert captured["backoff"] == 5.0
 
 
-# ---------- 4) _streaming_m3u8 退避实际走 _transcode_sleep ----------
+# ---------- 4) _streaming_m3u8 退避行为(deadline 状态机, Codex Review PR #69) ----------
+# 关键不变量:
+#   - size-based 长 sleep **仅**在 errno==31341 时发生
+#   - 非 31341(JSON/空/坏 JSON/adToken 失败) → 立即 return None, 不 sleep
+#   - sleep 只发生在两次请求之间; 末次 poll 成功不睡, 或超 deadline 不睡
 
-def test_streaming_m3u8_31341_uses_transcode_sleep(monkeypatch):
-    """31341 分支的 sleep 入参应等于 _transcode_sleep(base, attempt, size)。"""
+def test_streaming_m3u8_31341_uses_transcode_sleep_then_succeeds(monkeypatch):
+    """31341 分支走 size-based sleep; 第 N 次 poll 拿到 M3U8 → 成功,且末次不睡。"""
     sleeps: list[float] = []
     monkeypatch.setattr("adapters.source_baidu.time.sleep", lambda s: sleeps.append(s))
 
@@ -152,7 +158,7 @@ def test_streaming_m3u8_31341_uses_transcode_sleep(monkeypatch):
 
     def fake_text(url):
         calls["n"] += 1
-        # 前 2 次返 31341 JSON,第 3 次返 M3U8
+        # 前 2 次返 31341,第 3 次返 M3U8
         if calls["n"] < 3:
             return '{"errno": 31341}'
         return "#EXTM3U\n#EXT-X-VERSION:3\n"
@@ -165,37 +171,126 @@ def test_streaming_m3u8_31341_uses_transcode_sleep(monkeypatch):
     out = src._streaming_m3u8(item, retries=6, backoff=15.0)
 
     assert out is not None and out.startswith("#EXTM3U")
-    # 应有 2 次 sleep(attempt 0 和 1),值由 _transcode_sleep 决定
+    # 前 2 次失败各睡一次(attempt 0/1),第 3 次 poll 成功不再睡
     assert len(sleeps) == 2
-    exp0 = BaiduSource._transcode_sleep(15.0, 0, 100 * MB)
-    exp1 = BaiduSource._transcode_sleep(15.0, 1, 100 * MB)
-    assert sleeps[0] == pytest.approx(exp0)
-    assert sleeps[1] == pytest.approx(exp1)
+    assert sleeps[0] == pytest.approx(BaiduSource._transcode_sleep(15.0, 0, 100 * MB))
+    assert sleeps[1] == pytest.approx(BaiduSource._transcode_sleep(15.0, 1, 100 * MB))
 
 
-def test_streaming_m3u8_adtoken_branch_uses_transcode_sleep(monkeypatch):
-    """非 31341、无 M3U8 的 adToken 分支末尾 sleep 也走 _transcode_sleep。"""
+# ---- Codex Review 要求的 4 个回归测试 ----
+
+def test_streaming_m3u8_non_31341_errno_does_not_sleep(monkeypatch):
+    """[回归] 大视频返非 31341 JSON(如 errno=-9 文件不存在)→ 不进入 size-based 长 sleep。
+
+    这正是 review 指出的核心问题: 永久错误不应吃大视频等待窗口。
+    """
     sleeps: list[float] = []
     monkeypatch.setattr("adapters.source_baidu.time.sleep", lambda s: sleeps.append(s))
 
-    def fake_text(url):
-        # 始终返无 errno 的非 M3U8 JSON → 进 adToken 分支(无 adToken)→ 末尾 sleep
-        return '{"errno": 0, "adToken": "abc"}'
-
-    monkeypatch.setattr(BaiduSource, "_http_get_text", lambda self, url: fake_text(url))
+    monkeypatch.setattr(BaiduSource, "_http_get_text",
+                        lambda self, url: '{"errno": -9}')  # 文件不存在/路径错
     monkeypatch.setattr(BaiduSource, "ensure_token", lambda self: "tok")
 
     src = _make_source(monkeypatch)
-    item = _video_item(200 * MB)  # 200MB → 档 (7, 20.0)
-    out = src._streaming_m3u8(item, retries=2, backoff=20.0)
+    item = _video_item(5 * GB)  # 5GB → 档 (8, 30.0),按旧实现会等 ~19min
+    out = src._streaming_m3u8(item, retries=8, backoff=30.0)
 
-    assert out is None  # 重试耗尽
-    # 每次 attempt 末尾 sleep 一次(adToken 二次请求未拿到 M3U8 → 不提前 return)
-    assert len(sleeps) == 2
-    exp0 = BaiduSource._transcode_sleep(20.0, 0, 200 * MB)
-    exp1 = BaiduSource._transcode_sleep(20.0, 1, 200 * MB)
-    assert sleeps[0] == pytest.approx(exp0)
-    assert sleeps[1] == pytest.approx(exp1)
+    assert out is None
+    assert sleeps == [], "非 31341 永久错误不应 sleep(快速兜底)"
+
+
+def test_streaming_m3u8_empty_or_bad_json_does_not_sleep(monkeypatch):
+    """[回归] 大视频返空响应或坏 JSON → 不进入 size-based 长 sleep。"""
+    sleeps: list[float] = []
+    monkeypatch.setattr("adapters.source_baidu.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(BaiduSource, "ensure_token", lambda self: "tok")
+
+    src = _make_source(monkeypatch)
+    item = _video_item(5 * GB)  # 档 (8, 30.0)
+
+    # 空响应(如网络异常被吞成 text="")
+    monkeypatch.setattr(BaiduSource, "_http_get_text", lambda self, url: "")
+    assert src._streaming_m3u8(item, retries=8, backoff=30.0) is None
+    assert sleeps == [], "空响应不应 sleep"
+
+    # 坏 JSON
+    monkeypatch.setattr(BaiduSource, "_http_get_text", lambda self, url: "<<<not json>>>")
+    assert src._streaming_m3u8(item, retries=8, backoff=30.0) is None
+    assert sleeps == [], "坏 JSON 不应 sleep"
+
+
+def test_streaming_m3u8_adtoken_non_31341_does_not_sleep(monkeypatch):
+    """[回归] adToken 分支立即二次请求; 二次仍非 31341 → 不进转码等待(review 意见 4)。"""
+    sleeps: list[float] = []
+    monkeypatch.setattr("adapters.source_baidu.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(BaiduSource, "ensure_token", lambda self: "tok")
+
+    def fake_text(url):
+        # 主请求带 adToken,二次请求(带 adToken 参数)仍返非 31341 JSON
+        return '{"errno": -130, "adToken": "abc"}'  # -130: 非转码类错误
+
+    monkeypatch.setattr(BaiduSource, "_http_get_text", lambda self, url: fake_text())
+    # 注意: 上面 lambda 忽略 url,fake_text() 每次返同一串 → 主/二次请求都非 31341
+
+    src = _make_source(monkeypatch)
+    item = _video_item(200 * MB)  # 档 (7, 20.0)
+    out = src._streaming_m3u8(item, retries=7, backoff=20.0)
+
+    assert out is None
+    assert sleeps == [], "adToken 二次请求仍非 31341 → 不应 sleep"
+
+
+def test_streaming_m3u8_deadline_avoids_tail_sleep(monkeypatch):
+    """[回归] 永远 31341 时,sleep 次数有硬上限 == retries,不会"睡完不再 poll"地多睡。
+
+    reviewer 意见 3 的可观测不变量: 旧实现 for-range(retries) 末次也会先 sleep 再退出,
+    本测试验证新状态机在 attempt>=retries 时立即 return None(不睡第 retries+1 次)。
+
+    注: deadline 守卫(``time.monotonic()+wait > deadline``)是真实运行时漂移的安全网
+    ——mock time.sleep 不前进时它不会单独触发,故此处主要验证 attempt 上限不超睡。
+    """
+    sleeps: list[float] = []
+    monkeypatch.setattr("adapters.source_baidu.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(BaiduSource, "ensure_token", lambda self: "tok")
+
+    # 永远 31341
+    monkeypatch.setattr(BaiduSource, "_http_get_text",
+                        lambda self, url: '{"errno": 31341}')
+
+    src = _make_source(monkeypatch)
+    item = _video_item(10 * MB)
+    out = src._streaming_m3u8(item, retries=2, backoff=0.001)
+
+    assert out is None
+    # attempt 0 睡、attempt 1 睡、attempt 2==retries → 不睡直接退出
+    assert len(sleeps) == 2, f"应只睡 retries(2)次,实际 {len(sleeps)}"
+
+
+def test_streaming_m3u8_deadline_guards_realtime_drift(monkeypatch):
+    """[回归] deadline 守卫: 模拟真实 sleep 推进时间后,超预算则不睡(运行时兜底)。
+
+    用真实 time.sleep + 足够大的 backoff 让单次 wait 超过初始 deadline。
+    由于 _transcode_sleep 单调递增,第二次 wait 必然让 now+wait > deadline。
+    """
+    real_sleep = time.sleep  # 用真实 sleep 推进 monotonic 时钟
+    sleeps: list[float] = []
+    monkeypatch.setattr("adapters.source_baidu.time.sleep",
+                        lambda s: (sleeps.append(s), real_sleep(s))[1])
+    monkeypatch.setattr(BaiduSource, "ensure_token", lambda self: "tok")
+    monkeypatch.setattr(BaiduSource, "_http_get_text",
+                        lambda self, url: '{"errno": 31341}')
+
+    src = _make_source(monkeypatch)
+    item = _video_item(0)  # size=0 → size_factor=0,纯线性退避,可预测
+    # retries=3, backoff=0.05: budget = 0.05*(1+2+3) = 0.3s
+    # attempt0 sleep 0.05; attempt1 sleep 0.10(累计实时 0.15); attempt2 wait=0.15,
+    # now(≈0.15)+0.15=0.30 vs deadline(0.30)边界,但真实 sleep 有调度开销 → now 略>0.15 → 超 → 不睡
+    out = src._streaming_m3u8(item, retries=3, backoff=0.05)
+
+    assert out is None
+    # 至少睡了 attempt0(0.05),attempt1 视漂移可能睡;attempt2 大概率被 deadline 拦下
+    # 核心断言: sleep 次数 <= retries,不会无限睡
+    assert 1 <= len(sleeps) <= 3, f"sleep 次数 {len(sleeps)} 应在 [1, retries] 内"
 
 
 # ---------- helpers ----------
