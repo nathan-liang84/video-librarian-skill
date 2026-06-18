@@ -446,15 +446,12 @@ class BaiduSource(Source):
           错、其它 errno)、空响应、坏 JSON → 立即 ``return None``,不吃大视频等待窗口。
         - ``adToken`` 分支**先立即二次请求**;二次请求仍明确返 31341 才进转码等待,普通
           adToken 失败不当转码未就绪。
-        - **deadline 状态机**而非固定次数循环:sleep 只发生在两次请求之间,sleep 前先检查
-          deadline,保证不会"睡完不再 poll"或末次无意义 sleep。
+        - **``attempt >= retries`` 硬上限**,恰好 ``retries`` 次 sleep + 末次 poll。完整保留
+          size-based 转码预算(不引入 deadline 守卫——它会因请求/解析耗时而误杀末次最大等待,
+          把宣称的 ~19min 窗口缩水,Codex Review R2)。sleep 只发生在两次请求之间。
         - ``retries``/``backoff`` 仅决定 31341 的退避预算(由 _video_frames 按 size 换档),
           非 31341 路径不读它们 → 大视频遇永久错误会快速兜底,不会让 02_extract 看起来挂住。
         """
-        # 31341 转码等待预算(单调时钟 deadline)。budget = 若干次 _transcode_sleep 之和。
-        budget = sum(self._transcode_sleep(backoff, a, item.size or 0)
-                     for a in range(max(retries, 1)))
-        deadline = time.monotonic() + budget
         attempt = 0
         while True:
             # ---- 主请求 ----
@@ -483,13 +480,13 @@ class BaiduSource(Source):
             if not data or data.get("errno") != _TRANSCODE_NOT_READY:
                 return None
 
-            # ---- 31341 转码未就绪:sleep 前检查 deadline ----
+            # ---- 31341 转码未就绪:硬上限 attempt>=retries ----
+            # 方案 A(Codex Review R2):恰好 retries 次 sleep + 末次 poll,完整保留 size-based
+            # 预算。不做 deadline 守卫——它会因请求/解析耗时让末次(最大)等待被误杀,
+            # 把宣称的 ~19min 窗口缩水。retries 本身已是硬次数上限,无超睡风险。
             if attempt >= retries:
                 return None
-            wait = self._transcode_sleep(backoff, attempt, item.size or 0)
-            if time.monotonic() + wait > deadline:
-                return None  # 超预算 → 不再睡(避免睡完不再 poll 的无意义等待)
-            time.sleep(wait)
+            time.sleep(self._transcode_sleep(backoff, attempt, item.size or 0))
             attempt += 1
 
     @staticmethod

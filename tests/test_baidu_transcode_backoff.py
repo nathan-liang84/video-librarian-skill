@@ -240,14 +240,14 @@ def test_streaming_m3u8_adtoken_non_31341_does_not_sleep(monkeypatch):
     assert sleeps == [], "adToken 二次请求仍非 31341 → 不应 sleep"
 
 
-def test_streaming_m3u8_deadline_avoids_tail_sleep(monkeypatch):
-    """[回归] 永远 31341 时,sleep 次数有硬上限 == retries,不会"睡完不再 poll"地多睡。
+def test_streaming_m3u8_hard_cap_sleeps_exactly_retries(monkeypatch):
+    """[回归 R2] 永远 31341 时,sleep 次数有硬上限 == retries,恰好 retries 次 sleep + 末次 poll。
 
-    reviewer 意见 3 的可观测不变量: 旧实现 for-range(retries) 末次也会先 sleep 再退出,
-    本测试验证新状态机在 attempt>=retries 时立即 return None(不睡第 retries+1 次)。
+    Codex Review R2 指出原 deadline 守卫会误杀末次最大等待(缩水宣称的转码窗口)。
+    方案 A 改用 attempt>=retries 硬上限,完整保留预算;本测试验证不超睡也不少睡。
 
-    注: deadline 守卫(``time.monotonic()+wait > deadline``)是真实运行时漂移的安全网
-    ——mock time.sleep 不前进时它不会单独触发,故此处主要验证 attempt 上限不超睡。
+    时钟确定性: monkeypatch time.sleep 为空操作(不推进时间),sleep 次数完全由
+    attempt>=retries 决定,与运行时漂移无关。
     """
     sleeps: list[float] = []
     monkeypatch.setattr("adapters.source_baidu.time.sleep", lambda s: sleeps.append(s))
@@ -259,38 +259,47 @@ def test_streaming_m3u8_deadline_avoids_tail_sleep(monkeypatch):
 
     src = _make_source(monkeypatch)
     item = _video_item(10 * MB)
-    out = src._streaming_m3u8(item, retries=2, backoff=0.001)
 
+    # retries=3: poll→sleep(attempt0)→poll→sleep(attempt1)→poll→sleep(attempt2)→
+    # poll(attempt3, 3>=3 return None)。恰好 3 次 sleep + 4 次 poll。
+    out = src._streaming_m3u8(item, retries=3, backoff=0.001)
     assert out is None
-    # attempt 0 睡、attempt 1 睡、attempt 2==retries → 不睡直接退出
-    assert len(sleeps) == 2, f"应只睡 retries(2)次,实际 {len(sleeps)}"
+    assert len(sleeps) == 3, f"应恰好睡 retries(3)次,实际 {len(sleeps)}"
 
 
-def test_streaming_m3u8_deadline_guards_realtime_drift(monkeypatch):
-    """[回归] deadline 守卫: 模拟真实 sleep 推进时间后,超预算则不睡(运行时兜底)。
+def test_streaming_m3u8_preserves_full_budget_under_request_latency(monkeypatch):
+    """[回归 R2] 即使每次请求有延迟,仍完成全部 retries 次 sleep + 末次 poll,预算不被截断。
 
-    用真实 time.sleep + 足够大的 backoff 让单次 wait 超过初始 deadline。
-    由于 _transcode_sleep 单调递增,第二次 wait 必然让 now+wait > deadline。
+    这是 Codex Review R2 的核心诉求:旧 deadline 守卫因请求/解析耗时会误杀末次等待。
+    方案 A 用 attempt>=retries 硬上限,与墙钟无关 → 请求延迟不影响 sleep 次数。
+    用真实 time.sleep 模拟每次请求耗时 5ms,backoff 较小,验证 sleep 次数仍 == retries。
     """
-    real_sleep = time.sleep  # 用真实 sleep 推进 monotonic 时钟
+    real_sleep = time.sleep
     sleeps: list[float] = []
-    monkeypatch.setattr("adapters.source_baidu.time.sleep",
-                        lambda s: (sleeps.append(s), real_sleep(s))[1])
+
+    def fake_sleep(s):
+        sleeps.append(s)  # 转码等待:只记录不真睡(加速测试);实现里 time.sleep 只在此用
+
+    def fake_text(self, url):
+        real_sleep(0.005)  # 每次请求耗 5ms(模拟延迟,正是 R2 担心的耗时来源)
+        return '{"errno": 31341}'
+
+    monkeypatch.setattr("adapters.source_baidu.time.sleep", fake_sleep)
+    monkeypatch.setattr(BaiduSource, "_http_get_text", fake_text)
     monkeypatch.setattr(BaiduSource, "ensure_token", lambda self: "tok")
-    monkeypatch.setattr(BaiduSource, "_http_get_text",
-                        lambda self, url: '{"errno": 31341}')
 
     src = _make_source(monkeypatch)
-    item = _video_item(0)  # size=0 → size_factor=0,纯线性退避,可预测
-    # retries=3, backoff=0.05: budget = 0.05*(1+2+3) = 0.3s
-    # attempt0 sleep 0.05; attempt1 sleep 0.10(累计实时 0.15); attempt2 wait=0.15,
-    # now(≈0.15)+0.15=0.30 vs deadline(0.30)边界,但真实 sleep 有调度开销 → now 略>0.15 → 超 → 不睡
-    out = src._streaming_m3u8(item, retries=3, backoff=0.05)
+    item = _video_item(0)  # size=0 → size_factor=0,纯线性退避
+    out = src._streaming_m3u8(item, retries=4, backoff=0.01)
 
     assert out is None
-    # 至少睡了 attempt0(0.05),attempt1 视漂移可能睡;attempt2 大概率被 deadline 拦下
-    # 核心断言: sleep 次数 <= retries,不会无限睡
-    assert 1 <= len(sleeps) <= 3, f"sleep 次数 {len(sleeps)} 应在 [1, retries] 内"
+    # 关键: 请求有延迟也必须完成全部 4 次 sleep,不被任何"超预算"逻辑截断
+    assert len(sleeps) == 4, (
+        f"请求延迟不应截断转码预算;应睡 4 次,实际 {len(sleeps)}"
+    )
+    # sleep 值应等于 _transcode_sleep(0.01, attempt, 0),未被打折
+    for a, s in enumerate(sleeps):
+        assert s == pytest.approx(BaiduSource._transcode_sleep(0.01, a, 0))
 
 
 # ---------- helpers ----------
