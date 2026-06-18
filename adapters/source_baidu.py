@@ -356,8 +356,59 @@ class BaiduSource(Source):
         out.write_bytes(self._http_get_bytes(url))
         return [out]
 
+    # ---------------- 转码退避(按视频大小动态计算) ----------------
+    # 背景: 百度 streaming 遇 31341(转码未就绪)需轮询重试。原固定 3 次 × 2s
+    # 基退避只够 ~12s,大视频来不及转码完只能走封面兜底(1 帧)。这里按 size 分档,
+    # 让大视频有更长的轮询窗口。_video_frames 仅在调用方未覆盖默认值时才切换,
+    # 显式传 retries/backoff 的旧调用走原逻辑(向后兼容)。
+
+    # size 档位 → (retries, base_backoff_s)。总等待上限 ≈ retries*(retries+1)/2 * backoff。
+    # 估算(等差 sleep,见 _transcode_sleep): <50MB ~2.5min / 50-200MB ~5.5min /
+    # 200MB-1GB ~10min / >1GB ~19min。
+    _TRANSCODE_PLAN: tuple[tuple[int, int, int, float], ...] = (
+        # (size_upper_bytes, retries, base_backoff_s)  —— size_upper 上界(独占)
+        (50 * 1024 * 1024,        5, 10.0),   # < 50MB
+        (200 * 1024 * 1024,       6, 15.0),   # 50-200MB
+        (1024 * 1024 * 1024,      7, 20.0),   # 200MB-1GB
+        (1 << 64,                 8, 30.0),   # >= 1GB
+    )
+
+    @staticmethod
+    def _transcode_wait_plan(size_bytes: int) -> tuple[int, float]:
+        """按视频大小返回 (retries, base_backoff)。
+
+        分档(<50MB / 50-200MB / 200MB-1GB / >=1GB);未知大小(size<=0)走最小档,
+        与历史小文件行为接近,不激进等待。
+        """
+        size = max(int(size_bytes or 0), 0)
+        for size_upper, retries, base_backoff in BaiduSource._TRANSCODE_PLAN:
+            if size < size_upper:
+                return retries, base_backoff
+        # 兜底(理论上 _TRANSCODE_PLAN 末档 size_upper = 1<<64 已覆盖;防御写法)
+        return 8, 30.0
+
+    @staticmethod
+    def _transcode_sleep(base_backoff: float, attempt: int, size_bytes: int) -> float:
+        """计算单次等待秒数。
+
+        基础线性退避 ``base_backoff * (1 + attempt)`` 叠加 size_factor:
+        大文件转码更慢,多等一点(每 MB 加 0.05s,上限 10s)。
+        attempt 从 0 起,故首拍 = base_backoff * 1 + size_factor。
+        """
+        MB = (size_bytes or 0) / (1024 * 1024)
+        size_factor = min(MB * 0.05, 10.0)  # 上限 10 秒
+        return base_backoff * (1 + attempt) + size_factor
+
     def _video_frames(self, item: SourceItem, dest_dir: Path, *, cap: int,
                       retries: int = 3, backoff: float = 2.0) -> list[Path]:
+        # 自动切换智能退避: 仅当调用方未覆盖默认值(retries==3 and backoff==2.0)时,
+        # 按 item.size 换档。显式传参 → 走原逻辑(向后兼容,如旧测试/上层固定档)。
+        #
+        # 注意:这里的 retries/backoff 只决定 _streaming_m3u8 在命中 errno==31341 时的
+        # 转码等待预算。非 31341(永久错误/空响应/坏 JSON/adToken 失败)会立即兜底,
+        # 不读这两个值——故大视频遇永久错误不会因长退避而挂住(Codex Review PR #69)。
+        if retries == 3 and backoff == 2.0:
+            retries, backoff = self._transcode_wait_plan(item.size or 0)
         m3u8 = self._streaming_m3u8(item, retries=retries, backoff=backoff)
         if m3u8 is None:
             return self._thumb_fallback(item, dest_dir)
@@ -389,23 +440,31 @@ class BaiduSource(Source):
         真机实测:成功时百度**直接返回 `#EXTM3U` 文本**(Content-Type application/x-mpegURL),
         **不是 JSON**;失败/未就绪时返回 JSON 错误体(如 errno=31341)。少数情况首个响应是带
         `adToken` 的 JSON,需要带 adToken 二次请求才拿到 M3U8。故:取**原文** → 嗅探首行。
+
+        退避策略(Codex Review 反馈 PR #69):
+        - size-based 长等待**严格 gating 在 errno==31341**。非 31341 的 JSON(路径/权限/token
+          错、其它 errno)、空响应、坏 JSON → 立即 ``return None``,不吃大视频等待窗口。
+        - ``adToken`` 分支**先立即二次请求**;二次请求仍明确返 31341 才进转码等待,普通
+          adToken 失败不当转码未就绪。
+        - **``attempt >= retries`` 硬上限**,恰好 ``retries`` 次 sleep + 末次 poll。完整保留
+          size-based 转码预算(不引入 deadline 守卫——它会因请求/解析耗时而误杀末次最大等待,
+          把宣称的 ~19min 窗口缩水,Codex Review R2)。sleep 只发生在两次请求之间。
+        - ``retries``/``backoff`` 仅决定 31341 的退避预算(由 _video_frames 按 size 换档),
+          非 31341 路径不读它们 → 大视频遇永久错误会快速兜底,不会让 02_extract 看起来挂住。
         """
-        for attempt in range(retries):
+        attempt = 0
+        while True:
+            # ---- 主请求 ----
             try:
                 text = self._http_get_text(self._streaming_url(item, vtype=vtype))
             except Exception:
                 text = ""
             if text.lstrip().startswith("#EXTM3U"):
                 return text
-            # 非 M3U8 → 多半是 JSON 错误体(只在该分支吞解析错,其它异常不掩盖)
-            try:
-                data = json.loads(text) if text.strip() else {}
-            except (json.JSONDecodeError, ValueError):
-                data = {}
-            if data.get("errno") == _TRANSCODE_NOT_READY:
-                time.sleep(backoff * (attempt + 1))
-                continue
-            ad = data.get("adToken")
+            data = self._parse_json_or_none(text)
+
+            # ---- adToken: 立即二次请求,不睡 ----
+            ad = (data or {}).get("adToken")
             if ad:
                 try:
                     text2 = self._http_get_text(
@@ -414,8 +473,35 @@ class BaiduSource(Source):
                     text2 = ""
                 if text2.lstrip().startswith("#EXTM3U"):
                     return text2
-            time.sleep(backoff * (attempt + 1))
-        return None
+                data = self._parse_json_or_none(text2) or data  # 用更明确的二次响应
+
+            # ---- 严格 gating: 只有 31341 才进转码等待 ----
+            # 非 31341(含 data is None: 空/坏 JSON; 或其它 errno)→ 立即失败,不 sleep。
+            if not data or data.get("errno") != _TRANSCODE_NOT_READY:
+                return None
+
+            # ---- 31341 转码未就绪:硬上限 attempt>=retries ----
+            # 方案 A(Codex Review R2):恰好 retries 次 sleep + 末次 poll,完整保留 size-based
+            # 预算。不做 deadline 守卫——它会因请求/解析耗时让末次(最大)等待被误杀,
+            # 把宣称的 ~19min 窗口缩水。retries 本身已是硬次数上限,无超睡风险。
+            if attempt >= retries:
+                return None
+            time.sleep(self._transcode_sleep(backoff, attempt, item.size or 0))
+            attempt += 1
+
+    @staticmethod
+    def _parse_json_or_none(text: str) -> Optional[dict[str, Any]]:
+        """把 streaming 响应原文解析成 JSON dict;空/坏 JSON 返回 None。
+
+        抽出来便于在 deadline 状态机里复用(主请求 + adToken 二次请求都要解析)。
+        解析错不掩盖其它异常——只吞 JSON 相关的。
+        """
+        if not text or not text.strip():
+            return None
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return None
 
     def _thumb_fallback(self, item: SourceItem, dest_dir: Path) -> list[Path]:
         """转码未就绪/抽帧失败 → 用封面 thumbs 作单帧兜底(quick 档可接受)。"""
